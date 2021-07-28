@@ -1,10 +1,10 @@
-# dguard
-Centralised playbooks , roles , templates , etc...
+# dguard (DataGuard with dg-broker on a 2-node Primary/Standby setup with Oracle 19c/Redhat 7.9
+Centralised playbooks,includes,roles,templates,etc... for easing the setup of a DataGuard-Setup
 
-All *.yaml or *.yml are ansible-playbooks
-All *.xml.j2 are json-templates used in the yaml-playbooks
+There are currenly 2 .yaml ansible-playbooks.
+All different *.xml.j2 files which are json-templates used in yaml-playbooks
 
-There is also 1 ansible-inventory (alias /etc/ansible/hosts) that should be located under
+There is 1 ansible-inventory (alias /etc/ansible/hosts) that should be located under
 ==> /home/ansible/BNP/ORAPROV_ANSIBLE/inventory/poc/hosts
 
 This file is a etc-host-like file to give each host a special group/role within ansible
