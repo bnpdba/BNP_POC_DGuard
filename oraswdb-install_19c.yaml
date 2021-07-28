@@ -1,0 +1,1392 @@
+---
+ - hosts: "{{ dsthost }}"
+   gather_facts: true
+   name: "Oracle Software Silent install and/or DB-creation of a Primary/Standby DB on Linux, SI and FileSystem-based"
+
+   become: yes
+   become_user: root
+
+   vars:
+       ansible_remote_tmp: /tmp
+       datapaths:
+         data01 : "{{ mnt_data01 }}/{{ dstosid_SID }}/"
+         data80 : "{{ mnt_data80 }}/{{ dstosid_SID }}/"
+         data81 : "{{ mnt_data81 }}/{{ dstosid_SID }}/"
+         arch   : "{{ mnt_archive }}/{{ dstosid_SID }}/"
+         reco   : "{{ mnt_reco }}/{{ dstosid_SID }}/"
+       oracle_env:
+         ORACLE_HOME: "{{ oracle_home_19000 }}"
+         LD_LIBRARY_PATH: "{{ oracle_home_19000 }}/lib:{{ default_user_home }}.local/lib/python3.9/site-packages"
+   tasks:
+    
+
+   - name: "Check if the parameter:dsthost is part of the oranodes"
+     debug:
+       msg: "The current server {{ dsthost }} exists and is part of oranodes"
+     when: 
+       - dsthost in groups['oranodes']
+     tags: 00_chkserver
+
+   - name: "Check if the parameter:dsthost is also part of the Primary nodes"
+     debug:
+       msg: "The current server {{ dsthost }} exists and is part of primary nodes"
+     when: 
+       - dsthost in groups['oranodes']
+       - dsthost in groups['primnodes']
+       - dsthost == primnodes[0]
+     tags: 00_chkserver
+
+   - name: "Check if the host-parameter {{ dsthost }} is also part of the standby nodes"
+     debug:
+       msg: "The host-parameter {{ dsthost }} exists and is part of the standby nodes"
+     when: 
+       - dsthost in groups['oranodes']
+       - dsthost in groups['stdbynodes']
+       - dsthost == stdbynodes[0]
+     tags: 00_chkserver
+
+   - name: "Include variables for RedHat"
+     include_vars: /home/ansible/BNP/ORAPROV_ANSIBLE/vars/poc.el7.global.yml
+     tags: 
+       - always
+
+   - name: "{{ type }}-based , FSystem-based Silent Install Vers:{{ vm_OVERS }}, parameters are OracleSID:{{ dstosid_SID }} , Server:{{ dsthost }} , OS:{{ ansible_distribution }} Version:{{ ansible_distribution_major_version }}"
+     command: echo "Oké , the OS is {{ item }}"
+     with_items:
+       - RedHat
+     when: 
+       - dsthost is defined 
+       - dstosid is defined
+       - ansible_os_family == item
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     ignore_errors: False
+     tags: 
+       - always
+     args:
+       warn: false
+
+   - name: Check for existimg DB-files under {{ item.value }}
+     shell: "ls {{ item.value }} | wc -l"
+     with_dict: "{{ datapaths }}"
+     register: datapaths_dict
+     ignore_errors: True
+     tags: 03_chkdb
+
+   - name: "iterate through with_dict of datapaths_dict.results"
+     debug:
+       msg: |
+         Attention
+         =========
+         - Database:{{ dstosid_SID }} HAS STILL DB-files 
+
+         Solution
+         ========
+         - Stop this DB and remove its Datafiles.
+         - OR
+         - Restart this same "orasw-install.yaml" with another ORACLE_SID than the existing one:{{ dstosid_SID }}
+     with_items: "{{ datapaths_dict.results }}"
+     when: item.stdout_lines|length > 0
+     tags: 03_chkdb
+
+   - name: "iterate through with_dict of datapaths_dict.results"
+     debug:
+       msg: 'NO LEFT-Behind DB-Files for his ORACLE_SID:{{ dstosid_SID }} (which is OK)'
+     with_items: "{{ datapaths_dict.results }}"
+     when: item.stdout_lines|length == 0
+     tags: 03_chkdb
+
+   - name: unmount the existing xfs-filesystems on {{ dsthost }}
+     mount:
+        path: "{{ item.mountp }}"
+        state: unmounted
+     with_items:
+       - { mountp: "{{ mnt_orasoft_19 }}"}
+       - { mountp: "{{ mnt_data01 }}" }
+       - { mountp: "{{ mnt_data80 }}" }
+       - { mountp: "{{ mnt_data81 }}" }
+       - { mountp: "{{ mnt_archive }}"}
+       - { mountp: "{{ mnt_reco }}"   }
+     register: umount_xfs
+     when: dsthost is defined
+     ignore_errors: True
+     tags: 04_makexfs
+
+   - name: Create the xfs-filesystems on {{ dsthost }}
+     filesystem:
+       fstype: "{{ item.fstype }}"
+       dev: "{{ item.devname }}"
+     with_items:
+       - { fstype: "{{ fstype_tmp }}",         devname: "{{ dev_tmp }}"}
+       - { fstype: "{{ fstype_orasoft_19 }}",  devname: "{{ dev_orasoft_19 }}"}
+       - { fstype: "{{ fstype_data01 }}",      devname: "{{ dev_data01 }}"}
+       - { fstype: "{{ fstype_data80 }}",      devname: "{{ dev_data80 }}"}
+       - { fstype: "{{ fstype_data81 }}",      devname: "{{ dev_data81 }}"}
+       - { fstype: "{{ fstype_admin }}",       devname: "{{ dev_admin }}"}
+       - { fstype: "{{ fstype_archive }}",     devname: "{{ dev_archive }}"}
+       - { fstype: "{{ fstype_reco }}",        devname: "{{ dev_reco }}"}
+     register: mk_xfs
+     when: dsthost is defined and dstosid is defined
+     ignore_errors: True
+     tags: 04_makexfs
+
+   - name: Check wheter all mountpoints are available for mounting on {{ dsthost }}
+     file:
+       path: "{{ item }}"
+       state: directory
+     with_items:
+       - "{{ nas_soft_mnt }}"
+       - "{{ mnt_tmp }}"
+       - "{{ mnt_orasoft_19 }}"
+       - "{{ mnt_adump }}"
+       - "{{ mnt_diag }}"
+       - "{{ mnt_data01 }}"
+       - "{{ mnt_data80 }}"
+       - "{{ mnt_data81 }}"
+       - "{{ mnt_archive }}"
+       - "{{ mnt_reco }}"
+       - "{{ mnt_redo }}"
+       - "{{ mnt_backup }}"
+       - "{{ mnt_control }}"
+       - "{{ mnt_checkpnts }}"
+       - "{{ mnt_dgconfig }}"
+     register: chk_xfs
+     when: dsthost is defined and dstosid is defined
+     ignore_errors: True
+     tags: 04_makexfs
+
+   - name: mount all logical volumes
+     mount:
+       name: "{{ item.mountp }}"
+       src: "{{ item.devname }}"
+       fstype: "{{ item.type }}"
+       opts: noatime
+       state: mounted
+     with_items:
+       - { mountp: "{{ mnt_tmp }}",         devname: "{{ dev_tmp }}",         type: "{{ fstype_tmp }}"}
+       - { mountp: "{{ mnt_orasoft_19 }}",  devname: "{{ dev_orasoft_19 }}",  type: "{{ fstype_orasoft_19 }}"}
+       - { mountp: "{{ mnt_data01 }}",      devname: "{{ dev_data01 }}",      type: "{{ fstype_data01 }}"}
+       - { mountp: "{{ mnt_data80 }}",      devname: "{{ dev_data80 }}",      type: "{{ fstype_data80 }}"}
+       - { mountp: "{{ mnt_data81 }}",      devname: "{{ dev_data81 }}",      type: "{{ fstype_data81 }}"}
+       - { mountp: "{{ mnt_archive }}",     devname: "{{ dev_archive }}",     type: "{{ fstype_archive }}"}
+       - { mountp: "{{ mnt_reco }}",        devname: "{{ dev_reco }}",        type: "{{ fstype_reco }}"}
+     register: mount_xfs
+     ignore_errors: True
+     tags: 04_makexfs
+
+
+  ###########################################
+  # Prepare and activate the SWAP           #
+  ###########################################
+
+   - name: Format the swap-device
+     command: mkswap "{{ dev_swap }}"
+     when: ansible_swaptotal_mb < 128
+     tags: 04_mkswap
+
+   - name: Activate the swap-device
+     command: swapon "{{ dev_swap }}"
+     when: ansible_swaptotal_mb < 128
+     tags: 04_mkswap
+
+  ###########################################
+  # Prepare and mount required NAS-mounts   #
+  ###########################################
+
+   - name: Checking for processes with same OracleSID {{ dstosid_SID }} already created - already running
+     shell: "ps -fu {{ oracle_user }} | grep -v 'grep' | grep 'ora_' | awk '{print $2}'"
+     register: oracle_processes
+     when: dsthost is defined and dstosid is defined
+     tags: 05_chkdb
+
+   - fail:
+       msg: |
+         Attention
+         =========
+         - Database:{{ dstosid_SID }} IS ALREADY RUNNNING
+
+         Solution
+         ========
+         - Start oraswdb-uninstall.yaml --tags="dropdb", as this will only detect and DROP it.
+         - OR
+         - Restart this same "orasw-install.yaml" with another ORACLE_SID than the existing one:{{ dstosid_SID }}
+     when: oracle_processes.stdout_lines|length > 0
+     tags: 05_chkdb
+
+   - debug:
+       msg: 'NO LEFT-RUNNING PROCESSES for this ORACLE_SID:{{ dstosid_SID }} (which is OK)'
+     tags: 05_chkdb
+
+#   - name: Check for existimg DB-files under {{ mnt_data01 }}
+#     find:1G
+#       paths: "{{ mnt_data01 }}"
+#       file_type: file
+#     register: datafound
+#     when: dsthost is defined and dstosid is defined
+#     tags: 05_chkdb
+
+#   - fail:
+#       msg: |
+#          Attention
+#         =========
+#         - There are still datafiles under:{{ mnt_data01 }} with the same ORACLE_SID:{{ dstosid_SID }} 
+
+#         Solution
+#         ========
+#         - Startup database:{{ dstosid_SID }} with "dbstart {{ oracle_home_19000 }}", use "oraswdb-uninstall-19c.yaml" to drop it.
+#         - OR
+#         - Restart this same "oraswdb-install_19c.yaml" with another ORACLE_SID than the existing one:{{ dstosid_SID }}
+#     when: datafound.matched > 0
+#     tags: 05_chkdb
+
+#   - debug:
+#       msg: 'Oradata Directory "{{ mnt_data01 }}" IS empty (which is OK) , no processes left running for this DB: {{ dstosid_SID }} (which is also OK)'
+#     tags: 05_chkdb
+
+   - name: Check for LISTENER-processes {{ vm_LISTNAME }} from previous installations
+     ignore_errors: true
+     shell: "ps -fu {{ oracle_user }} | grep {{ vm_LISTNAME }} | grep -v grep | awk '{print $2}'"
+     register: lsnr_processes
+     when: dsthost is defined and dstosid is defined
+     tags: 05_chkdb
+
+   - name: Kill LISTENER-processes from previous installations
+     ignore_errors: yes
+     shell: "kill {{ item }}"
+     with_items: "{{ lsnr_processes.stdout_lines }}"
+     tags: 05_chkdb
+
+   - wait_for:
+       path: "/proc/{{ item }}/status"
+       state: absent
+     with_items: "{{ lsnr_processes.stdout_lines }}"
+     ignore_errors: yes
+     register: stubbornly_processes
+     tags: 05_chkdb
+
+   - name: Force kill stubbornly processes
+     shell: "kill -9 {{ item }}"
+     with_items: "{{ stubbornly_processes.results | select('failed') | map(attribute='item') | list }}"
+     when: dsthost is defined and dstosid is defined
+     ignore_errors: yes
+     tags: 05_chkdb
+
+   - name: "Since this is a plain {{ ansible_distribution }} , we will have to install Oracle Public repos."
+     yum_repository:
+       name: "{{ item.entry }}"
+       file: "{{ item.filename }}"
+       description: "{{ item.descr }}"
+       baseurl: "{{ item.base }}"
+       gpgcheck: false
+       enabled: true
+     with_items:
+       - { entry: 'ol7_latest'          , filename: 'public-yum-oracle7' , descr: 'Oracle Linux Latest'                , base: 'https://yum.oracle.com/repo/OracleLinux/OL7/latest/$basearch/'  }
+       - { entry: 'ol7_optional_latest' , filename: 'public-yum-oracle7' , descr: 'Oracle Linux Optional Latest'       , base: 'https://yum.oracle.com/repo/OracleLinux/OL7/optional/latest/$basearch/' }
+       - { entry: 'ol7_addons'          , filename: 'public-yum-oracle7' , descr: 'Oracle Linux Add ons'               , base: 'https://yum.oracle.com/repo/OracleLinux/OL7/addons/$basearch/' }
+       - { entry: 'ol7_developer_EPEL'  , filename: 'public-yum-oracle7' , descr: 'Oracle Linux Development Packages ' , base: 'https://yum.oracle.com/repo/OracleLinux/OL7/developer_EPEL/$basearch/' }
+     when: dsthost is defined and dstosid is defined
+     ignore_errors: yes
+     tags: 06_instbasic
+
+   - name: "YUM: Install BASIC packages before starting Oracle-install"
+     yum:
+       name: "{{ basic_packages }}"
+       state: installed
+     when:
+       - dsthost is defined
+       - ansible_system == 'Linux'
+       - ansible_distribution in ['RedHat']
+     ignore_errors: yes
+     tags: 06_instbasic
+
+   - name: "YUM: Install ORACLE-REQUIRED packages before starting Oracle-install"
+     yum:
+       name: "{{ item }}"
+       state: installed
+     with_items: "{{ oracle_packages }}"
+     when:
+       - dsthost is defined
+       - ansible_system == 'Linux'
+       - ansible_distribution in ['RedHat']
+     ignore_errors: yes
+     tags: 06_instbasic
+
+   - debug:
+       msg: "{{ item.item_label }} : {{ item.item_var }}"
+     with_items:
+       - { item_label: Hostname, item_var: "{{ hostvars[inventory_hostname].ansible_nodename }}" }
+       - { item_label: System,   item_var: "{{ hostvars[inventory_hostname].ansible_system }}" }
+       - { item_label: Real OS,  item_var: "{{ hostvars[inventory_hostname].ansible_distribution }}" }
+       - { item_label: OS_fam,   item_var: "{{ hostvars[inventory_hostname].ansible_os_family }}" }
+       - { item_label: vCPU,     item_var: "{{ hostvars[inventory_hostname].ansible_processor_vcpus }}" }
+       - { item_label: RAM,      item_var: "{{ hostvars[inventory_hostname].ansible_memtotal_mb }}" }
+       - { item_label: Swap,     item_var: "{{ hostvars[inventory_hostname].ansible_swaptotal_mb }}" }
+       - { item_label: Kernel,   item_var: "{{ hostvars[inventory_hostname].ansible_kernel }}" }
+       - { item_label: Dist_vers,item_var: "{{ hostvars[inventory_hostname].ansible_distribution_version }}" }
+     tags: 07_vminfo
+
+   - name: Check if firewall is installed
+     yum: list={{firewall_service}} disablerepo=*
+     register: firewall
+     when: dsthost is defined and disable_firewall and ansible_os_family == 'RedHat'
+     tags: 08_chkfwall
+
+   - name: Disable firewall
+     service: name={{ firewall_service }} state=stopped enabled=no
+     register: iptables
+     when: dsthost is defined and disable_firewall and ansible_os_family == 'RedHat' and firewall.results
+     tags: 08_chkfwall
+
+   - name: Disable selinux (permanently)
+     selinux: state=disabled
+     register: selinux
+     when: dsthost is defined and disable_selinux and ansible_os_family == 'RedHat'
+     tags: 08_chkfwall
+
+   - name: Disable selinux (runtime)
+     shell: setenforce 0
+     when: dsthost is defined and disable_selinux and ansible_os_family == 'RedHat'
+     changed_when: disable_selinux_runtime.rc == 0
+     failed_when: disable_selinux_runtime.rc > 0 and "SELinux is disabled" not in disable_selinux_runtime.stderr
+     register: disable_selinux_runtime
+     tags: 08_chkfwall
+
+   - name: Install chrony
+     yum: 
+       name: chrony 
+       state: present
+     ignore_errors: yes
+     when: dsthost is defined and disable_selinux and ansible_os_family == 'RedHat'
+     tags: 09_timesync
+
+   - name: chrony | start and enable chrony service
+     service:
+       name: "{{ chrony_service_name }}"
+       state: "{{ chrony_service_state }}"
+       enabled: "{{ chrony_service_enabled }}"
+     when: dsthost is defined and disable_selinux and ansible_os_family == 'RedHat'
+     tags: 09_timesync
+
+   - name: Check if ntpd service exists
+     stat: 
+       path="/usr/lib/systemd/system/ntpd.service"
+     when: dsthost is defined and disable_selinux and ansible_os_family == 'RedHat'
+     register: ntpd_service_status
+     tags: 09_timesync
+
+   - name: Stop and mask ntpd service
+     systemd:  
+       name: ntpd 
+       state: stopped 
+       masked: yes
+     when: ntpd_service_status.stat.exists == True and dsthost is defined
+     ignore_errors: yes
+     tags: 09_timesync
+
+   - name: Configure chrony
+     template: src=../templates/chrony.conf.j2 dest={{ chrony_config_location }} owner={{ root_user }} mode=0644
+     when: dsthost is defined
+     ignore_errors: yes
+     tags: 09_timesync
+
+   - name: Restart {{ chrony_service_name }}
+     service:
+       name: "{{ chrony_service_name }}"
+       state: "{{ chrony_service_state }}"
+       enabled: "{{ chrony_service_enabled }}"
+     when: dsthost is defined
+     ignore_errors: yes
+     tags: 09_timesync
+
+#   - name: Enable and start service {{ nfs_server_daemon }} on the {{ ctlhost }}
+#     service:
+#       name: "{{ nfs_server_daemon }}"
+#       state: started
+#       enabled: yes
+#     when: nfs_exports|length > 0
+#     delegate_to: "{{ ctlhost }}"
+#     tags: nfs
+
+   - name: Install NFS utils
+     yum:
+       name:
+         - nfs-utils
+       state: present
+     when: dsthost is defined
+     tags: 10_nfs
+
+   - name: Ensure rpcbind is running
+     service:
+       name: rpcbind
+       state: "{{ nfs_rpcbind_state }}"
+       enabled: "{{ nfs_rpcbind_enabled }}"
+     when: dsthost is defined
+     register: rpc_bind
+     ignore_errors: True
+     tags: 10_nfs
+
+   - name: NFS-mount {{ mnt_stage }}
+     mount:
+       src: "{{ nas_soft }}"
+       path: "{{ nas_soft_mnt }}"
+       opts: rw,vers=4,relatime,rsize=1048576,wsize=1048576,namlen=255,hard,proto=tcp,timeo=600,sec=sys,bg 
+       state: mounted
+       fstype: nfs
+     register: nfs_mount
+     when: dsthost is defined
+     ignore_errors: True
+     tags: 10_nfs
+
+   - name: Create required groups if not already done by {{ preinst_19 }}
+     group: 
+       name: "{{ item.group }}"
+       gid:  "{{ item.gid }}"
+       state:  present
+       system: no
+     with_items:
+       - { group: "{{ OINSTALL_GROUP }}",     gid: "{{ OINSTALL_ID }}"    }
+       - { group: "{{ DBA_GROUP }}",          gid: "{{ DBA_ID }}"         }
+       - { group: "{{ OPER_GROUP }}",         gid: "{{ OPER_ID }}"        }
+       - { group: "{{ OSBACKUPDBA_GROUP }}",  gid: "{{ OSBACKUPDBA_ID }}" }
+       - { group: "{{ OSDGDBA_GROUP }}",      gid: "{{ OSDGDBA_ID }}"     }
+       - { group: "{{ OSKMDBA_GROUP }}",      gid: "{{ OSKMDBA_ID }}"     }
+       - { group: "{{ ASMDBA_GROUP }}",       gid: "{{ ASMDBA_ID }}"      }
+       - { group: "{{ ASMOPER_GROUP }}",      gid: "{{ ASMOPER_ID }}"     }
+       - { group: "{{ ASMADMIN_GROUP }}",     gid: "{{ ASMADMIN_ID }}"    }
+       - { group: "{{ OSRACDBA_GROUP }}",     gid: "{{ OSRACDBA_ID }}"    }
+       - { group: "{{ DEFAULT_USER_GROUP }}", gid: "{{ DEFAULT_ID }}"     }
+     when: dsthost is defined
+     tags: 11_chkgroups
+
+   - name: Create/modify {{ oracle_user }} user, if not already done by {{ preinst_19 }}
+     user:
+       name: "{{ oracle_user }}"
+       uid: "{{ oracle_uid }}"
+       comment: Dba user {{ oracle_user }} created by ansible
+       group: "{{ DBA_GROUP }}"
+       groups: 
+       - "{{ OINSTALL_GROUP }}"
+       - "{{ OPER_GROUP }}"
+       - "{{ ASMADMIN_GROUP }}"
+       - "{{ ASMDBA_GROUP }}"
+       - "{{ OSDGDBA_GROUP }}"
+       - "{{ OSBACKUPDBA_GROUP }}"
+       - "{{ OSKMDBA_GROUP }}"
+       - "{{ OSRACDBA_GROUP }}"
+       append: no
+       home: "{{ oracle_user_home }}"
+       createhome: yes
+       shell: "{{ bash_shell }}"
+       update_password: always
+       password: "{{ slussel | password_hash('sha512') }}"
+       system: no
+       generate_ssh_key: yes
+       ssh_key_type: rsa
+       ssh_key_bits: 2048
+       ssh_key_file: .ssh/id_rsa
+       state: present
+     when:
+       - dsthost is defined
+       - dstosid is defined
+     tags: 12_chkusers
+
+   - name: "Cleanup some files from previous runs"
+     file:
+       state: absent
+       path: "{{ item }}"
+     with_items:
+       - "{{ oracle_scripts_dir }}"
+       - "{{ inventory_location }}"
+       - "{{ vm_CREDB_SH }}"
+       - "{{ vm_CREDB_CONF }}"
+       - "{{ vm_SETENV_SH }}"
+       - "{{ oratab_file }}"
+       - "{{ oraInst_file }}"
+     when: 
+       - dsthost is defined
+       - type is defined
+       - type == 'rpm' or type == 'tar' or type == 'zip'
+       - ansible_system == 'Linux'
+       - ansible_distribution in ['RedHat']
+     tags: 13_rmdirs
+
+   - name: Create/chown the needed Oracle standard directories for {{ oracle_user }}
+     file:
+       path: "{{ item.dest }}"
+       state: directory
+       owner: "{{ item.owner }}"
+       group: "{{ oracle_group }}"
+       mode: 0775
+     with_items:
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_orabase }}"        }
+       - { owner: "{{ oracle_user }}" , dest: "{{ inventory_location }}" }
+       - { owner: "{{ oracle_user }}" , dest: "{{ oracle_home_19000  }}" }
+       - { owner: "{{ oracle_user }}" , dest: "{{ oracle_scripts_dir }}" }
+       - { owner: "{{ oracle_user }}" , dest: "{{ oracle_user_home }}"   }
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_data01 }}"         }
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_data80 }}"         }
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_data81 }}"         }
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_archive }}"        }
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_reco }}"           }
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_redo }}"           }
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_backup }}"         }
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_control }}"        }
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_checkpnts }}"      }
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_adump }}"          }
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_diag }}"           }
+       - { owner: "{{ oracle_user }}" , dest: "{{ mnt_dgconfig }}"       }
+     when: 
+       - dsthost is defined
+       - dstosid is defined
+       - type == 'rpm' or type == 'tar' or type == 'zip'
+     tags: 14_chown
+
+   - name: Create/chown the needed global directories
+     file:
+       path: "{{ item }}"
+       state: directory
+       owner: "{{ root_user }}"
+       group: "{{ root_group }}"
+       mode: 0770
+     with_items:
+       - "{{ sudoers_dest_local }}"
+       - "{{ sudoers_dest_bnp }}"
+     when:
+       - dsthost is defined
+       - dstosid is defined
+     tags: 15_mkdirs
+
+   - name: "Copy root-profile and - settings"
+     copy:
+       src: "{{ item.prof1 }}"
+       dest: "{{ item.dest }}"
+       owner: "{{ item.u }}"
+       group: "{{ item.grp }}"
+       mode: 0755
+     with_items:
+       - { u: "{{ root_user }}" , grp: "{{ root_group }}" , dest: "{{ root_user_home }}", prof1: '{{ scripts_templates_dir }}/root/.profile' }
+       - { u: "{{ root_user }}" , grp: "{{ root_group }}" , dest: "{{ root_user_home }}", prof1: '{{ scripts_templates_dir }}/root/.bash_profile' }
+     when: dsthost is defined
+     tags: 15_rootprof
+
+   - name: YUM Install of the OS-DB-related preinst-rpm {{ preinst_19_el7 }} on Linux {{ ansible_distribution_major_version }}
+     shell: yum localinstall -y {{ preinst_19_rpm }}
+     when:
+       - type is defined
+       - type == 'rpm' or type == 'tar' or type == 'zip'
+       - dsthost is defined
+       - type is defined
+       - ansible_system == 'Linux'
+       - ansible_distribution in ['RedHat']
+     ignore_errors: yes
+     tags: 16_preinst19c
+
+   - name: "Check whether preinst-RPM has been installed correctly"
+     yum:
+       list: "{{ item }}"
+       state: present
+     with_items:
+       - "{{ preinst_19 }}"
+     when: 
+       - type is defined
+       - type == 'rpm' or type == 'tar' or type == 'zip'
+       - dsthost is defined
+       - ansible_system == 'Linux'
+       - ansible_distribution in ['RedHat']
+     ignore_errors: yes
+     tags: 16_preinst19c
+
+   - name: check if preinst-firstboot exists
+     stat: 
+       path: /etc/init.d/oracle-database-preinstall-19c-firstboot
+     register: kernrules
+     tags: 16_preinst19c
+
+   - name: adjust kernel-oracle settings
+     command: "/etc/init.d/oracle-database-preinstall-19c-firstboot start"
+     when: kernrules.stat.exists == True
+     tags: 16_preinst19c
+
+   - name: Unzip extracting oracle-software
+     become: yes
+     become_user: "{{ root_user }}"
+     shell: unzip -d "{{ oracle_home_19000 }}" "{{ orasoft_19_zip }}"
+     args:
+       chdir: "{{ oracle_home_19000 }}"
+     when:
+       - type == 'zip'
+       - dsthost is defined
+       - type is defined
+     register: softunzip
+     run_once: True
+     tags: 16_unpack19c
+
+   - name: Tar extracting oracle-software
+     become: yes
+     become_user: "{{ root_user }}"
+     shell: tar xvf {{ item.tarball }}
+     args:
+       chdir: "{{ item.dest }}"
+     with_items:
+       - { dest: "{{ mnt_orasoft_19 }}"  , tarball: "{{ orasoft_19_tar }}"  }
+     when:
+       - type == 'tar'
+       - dsthost is defined
+       - type is defined
+     register: softuntar
+     run_once: True
+     tags: 16_unpack19c
+
+   - name: Make sure extracted-software belongs to correct owner and group
+     become: yes
+     become_user: "{{ root_user }}"
+     file: 
+       dest: "{{ item.dest }}" 
+       owner: "{{ item.own }}"
+       group: "{{ oracle_group }}"
+       mode: '0775'
+       recurse: yes
+     with_items:
+       - { own: "{{ oracle_user }}"  , dest: "{{ oracle_base }}"  }
+     when:
+       - dsthost is defined
+       - type is defined
+       - type == 'tar' or type == 'zip'
+     ignore_errors: True
+     tags: 16_unpack19c
+
+   - name: YUM Now install the oracle-software {{ orasoft_19 }} under {{ oracle_home_19000 }}
+     shell: yum localinstall -y {{ orasoft_19_rpm }}
+     when:
+       - dsthost is defined
+       - type is defined
+       - type == 'rpm'
+       - ansible_system == 'Linux'
+       - ansible_distribution in ['RedHat']
+     register: softrpm
+     ignore_errors: yes
+     tags: 17_PrepSWONLY
+
+   - name: "Check whether oracle-software-RPM has been installed correctly"
+     yum:
+       list: "{{ item }}"
+       state: present
+     with_items:
+       - "{{ orasoft_19 }}"
+     when: 
+       - dsthost is defined
+       - type is defined
+       - type == 'rpm'
+       - ansible_system == 'Linux'
+       - ansible_distribution in ['RedHat']
+     tags: 17_PrepSWONLY
+
+   - name: Unlink some dead_links
+     become: yes
+     become_user: root
+     file: 
+       path: "{{ dstosid_dead_link1 }}" 
+       state: absent
+     when:
+       - type == 'tar'
+       - dsthost is defined
+       - type is defined
+     tags: 17_PrepSWONLY
+
+   - name: "Copy runinstall-response-template and change thresholds"
+     copy:
+       src: "{{ item.rsp }}"
+       dest: "{{ item.dest }}"
+       owner: "{{ item.u }}"
+       group: "{{ item.grp }}"
+       mode: 0775
+     with_items:
+       - { u: "{{ oracle_user }}",grp: "{{ oracle_group }}",dest: '{{ oracle_scripts_dir }}/silent-SWONLY.rsp' ,rsp: '{{ rsp_templates_dir }}/silent-SWONLY.rsp.template' }
+     when:
+       - dsthost is defined
+       - type is defined
+       - type == 'tar' or type == 'zip'
+     tags: 17_PrepSWONLY
+
+   - name: "Replacing parameters by values in the response-file {{ oracle_scripts_dir }}/silent-SWONLY.rsp "
+     replace:
+       path: "{{ oracle_scripts_dir }}/silent-SWONLY.rsp"
+       regexp: "{{ item.rexp }}"
+       replace: "{{ item.by }}"
+       backup: no
+     with_items:
+       - { rexp: '_OPTION',   by: "{{ vm_OPTION_SW }}"          }
+       - { rexp: '_UNIXGRP',  by: "{{ OINSTALL_GROUP }}"        }
+       - { rexp: '_INVLOC' ,  by: "{{ inventory_location }}"    }
+       - { rexp: '_OBASE' ,   by: "{{ oracle_base }}"           }
+       - { rexp: '_DBAGRP',   by: "{{ DBA_GROUP }}"             }
+       - { rexp: '_OPERGRP',  by: "{{ OPER_GROUP }}"            }
+       - { rexp: '_BACKGRP',  by: "{{ OSBACKUPDBA_GROUP }}"     }
+       - { rexp: '_DGDBAGRP', by: "{{ OSDGDBA_GROUP }}"         }
+       - { rexp: '_KMDBAGRP', by: "{{ OSKMDBA_GROUP }}"         }
+       - { rexp: '_RACGRP',   by: "{{ OSRACDBA_GROUP }}"        }
+       - { rexp: '_ROOT',     by: "{{ ROOT_N }}"                }
+       - { rexp: '_METHOD',   by: "{{ ROOT_FULL }}"             }
+     when:
+       - dsthost is defined
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip'
+     tags: 17_PrepSWONLY
+
+   - name: "Start Install of Oracle Software under:{{ oracle_home_19000 }}"
+     become: true
+     become_user: "{{ oracle_user }}"
+     shell: |
+       {{ INST_SW_RSP }}
+     when:
+       - dsthost is defined
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip'
+     register: swinstall 
+     changed_when: swinstall.stdout_lines
+     run_once: True
+     tags: 18_InstSWONLY
+
+   - debug: msg="{{ item }}"
+     with_items: "{{ swinstall.stdout_lines }}"
+     when: swinstall.stdout_lines
+     run_once: True
+     tags: 18_InstSWONLY
+
+   - name: Verify whether {{ oracle_root_sh }} exists
+     stat:
+       path: "{{ oracle_root_sh }}"
+     when: 
+       - dsthost is defined
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     register: rootsh
+     tags: 18_InstSWONLY
+
+   - name: "Report if file:{{ oracle_root_sh }} is missing "
+     debug: 
+       msg: "{{ oracle_root_sh }} does not exist"
+     when: 
+       - not rootsh.stat.exists
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     tags: 18_InstSWONLY
+
+   - name: "Report when file:{{ oracle_root_sh }} exists for running "
+     debug:
+       msg: "{{ oracle_root_sh }} exists and can be started by {{ root_user }}"
+     when:
+       - rootsh.stat.exists
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     tags: 18_InstSWONLY
+
+   - name: Running {{ oracle_root_sh }} as {{ root_user }}
+     shell: "{{ oracle_root_sh }}"
+     when:
+       - rootsh.stat.exists
+       - dsthost is defined
+       - type is defined
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     ignore_errors: yes
+     tags: 18_InstSWONLY
+
+   - name: Verify whether {{ orainst_root_sh }} exists
+     stat:
+       path: "{{ orainst_root_sh }}"
+     when: 
+       - dsthost is defined
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     register: instrootsh
+     tags: 18_InstSWONLY
+
+   - name: "Report if file:{{ orainst_root_sh }} is missing "
+     debug:
+       msg: "{{ orainst_root_sh }} does not exist"
+     when:
+       - not instrootsh.stat.exists
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     tags: 18_InstSWONLY
+
+   - name: "Report when file:{{ orainst_root_sh }} exists for running "
+     debug:
+       msg: "{{ orainst_root_sh }} exists and can be started by {{ root_user }}"
+     when:
+       - instrootsh.stat.exists
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     tags: 18_InstSWONLY
+
+   - name: Running {{ orainst_root_sh }} as {{ root_user }}
+     shell: "{{ orainst_root_sh }}"
+     when:
+       - instrootsh.stat.exists
+       - dsthost is defined
+       - type is defined
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     ignore_errors: yes
+     tags: 18_InstSWONLY
+
+   - name: "Copy user-profile and settings"
+     copy:
+       src: "{{ item.prof1 }}"
+       dest: "{{ item.dest }}"
+       owner: "{{ item.u }}"
+       group: "{{ item.grp }}"
+       mode: 0775
+     with_items:
+       - { u: "{{ oracle_user }}" ,grp: "{{ oracle_group }}",dest: "{{ oracle_user_home }}"  , prof1: '{{ scripts_templates_dir }}/oracle/.profile' }
+       - { u: "{{ oracle_user }}" ,grp: "{{ oracle_group }}",dest: "{{ oracle_user_home }}"  , prof1: '{{ scripts_templates_dir }}/oracle/.bash_profile' }
+     when: dsthost is defined
+     tags: 20_prepusers
+
+   - name: "Copy {{ oracle_user }} environment-file to {{ oracle_scripts_dir }}"
+     template: src=../templates/setEnv19c.xml.j2 dest={{ oracle_scripts_dir }}/setEnv{{ vm_OVERS_SHORT }}.sh owner={{ oracle_user }} mode=0755
+     when:
+       - dsthost is defined
+       - dstosid is defined
+       - type is defined
+     tags: 20_prepusers
+
+   - name: "For all users , change bash-shell to korn-shell"
+     user:
+       name: "{{ item.u }}"
+       shell: "{{ ksh_shell }}"
+     with_items:
+       - { u: "{{ root_user }}"    }
+       - { u: "{{ oracle_user }}"  }
+     when: dsthost is defined
+     tags: 20_prepusers
+
+   - name: "Copy db-templates to {{ oracle_scripts_dir }} , before actually changing parameters by values"
+     copy:
+       src: "{{ item.templ }}"
+       dest: "{{ item.dst }}"
+       mode: '0775'
+     with_items:
+       - { dst: '{{ vm_SETENV_SH }}',  templ: '{{ vm_SETENV_SH_TPL }}' }
+       - { dst: '{{ vm_CREDB_SH }}',   templ: '{{ vm_CREDB_SH_TPL }}' }
+       - { dst: '{{ vm_CREDB_CONF }}', templ: '{{ vm_CREDB_CONF_TPL }}' }
+       - { dst: '{{ vm_RESPONSE }}',   templ: '{{ vm_RESPONSE_TPL }}' }
+     when:
+       - dsthost is defined
+       - type is defined
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     tags: 21_dbtempl
+
+   - name: "Replacing the template-parameters by values"
+     replace:
+       path: "{{ item.tpl }}"
+       regexp: "{{ item.rexp }}"
+       replace: "{{ item.by }}"
+       backup: no
+     with_items:
+       - { tpl: "{{ vm_SETENV_SH  }}", rexp: '_OHOST',    by: "{{ dsthost }}"            }
+       - { tpl: "{{ vm_SETENV_SH  }}", rexp: '_OSID' ,    by: "{{ dstosid_SID }}"        }
+       - { tpl: "{{ vm_SETENV_SH  }}", rexp: '_OBASE' ,   by: "{{ mnt_orabase }}"        }
+       - { tpl: "{{ vm_SETENV_SH  }}", rexp: '_OHOME' ,   by: "{{ mnt_orasoft_19 }}"     }
+       - { tpl: "{{ vm_SETENV_SH  }}", rexp: '_OINV'  ,   by: "{{ inventory_location }}" }
+       - { tpl: "{{ vm_SETENV_SH  }}", rexp: '_ODATA',    by: "{{ mnt_data01 }}"         }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '_OHOST',    by: "{{ dsthost }}"            }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '_OSID' ,    by: "{{ dstosid_SID }}"        }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '_OBASE' ,   by: "{{ oracle_base }}"        }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '_OHOME' ,   by: "{{ oracle_home_19000 }}"  }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '_OINV'  ,   by: "{{ inventory_location }}" }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '_ODATA',    by: "{{ mnt_data01 }}"         }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '_OVERS' ,   by: "{{ vm_OVERS_SHORT }}"     }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '_LISTNR',   by: "{{ vm_LISTNAME }}"        }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '_CHARSET',  by: "{{ vm_CHARSET }}"         }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '=_CDB',     by: "{{ CDB_N }}"              }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '_OPDB1',    by: "{{ vm_OPDB1 }}"           }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '_OTEMPL',   by: "{{ vm_OTEMPL }}"          }
+       - { tpl: "{{ vm_CREDB_SH   }}", rexp: '_OSCRDIR',  by: "{{ oracle_scripts_dir }}" }
+       - { tpl: "{{ vm_CREDB_CONF }}", rexp: '_LSNRPORT', by: "{{ vm_LSNRPORT }}"        }
+       - { tpl: "{{ vm_CREDB_CONF }}", rexp: '_ORADATA',  by: "{{ mnt_data01 }}"         }
+       - { tpl: "{{ vm_CREDB_CONF }}", rexp: '_EM_PRT',   by: "{{ vm_EXPRESSPORT }}"     }
+     when:
+       - dsthost is defined
+       - type is defined
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     tags: 21_dbtempl
+
+   - name: "Check the resulting scripts from installing both RPM's"
+     stat:
+       path: "{{ item }}"
+     with_items:
+       - "{{ preinst_19_script }}"
+       - "{{ vm_SETENV_SH }}"
+       - "{{ vm_CREDB_SH }}"
+       - "{{ vm_CREDB_CONF }}"
+     when:
+       - dsthost is defined
+       - type is defined
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     tags: 21_dbtempl
+
+   - name: Create non-oracle user {{ default_user }} within correct groups, encrypting his password
+     user:
+       name: "{{ default_user }}"
+       uid: "{{ default_user_id }}"
+       comment: Default user {{ default_user }} created by ansible
+       group: "{{ DEFAULT_USER_GROUP }}"
+       groups:
+       - "{{ DEFAULT_USER_GROUP }}"
+       append: yes
+       home: "{{ default_user_home }}"
+       createhome: yes
+       shell: "{{ bash_shell }}"
+       update_password: on_create
+       password: "{{ slussel | password_hash('sha512') }}"
+       system: yes
+       generate_ssh_key: yes
+       ssh_key_type: rsa
+       ssh_key_bits: 2048
+       ssh_key_file: .ssh/id_rsa
+       state: present
+     when: dsthost is defined
+     tags: 22_chkcred
+
+   - name: Check users before adding them to the sudoers-list
+     user: 
+       name: "{{ item.username }}"
+       state: present
+       password: "{{ item.slus | password_hash('sha512') }}"
+     with_items:
+       - { username: "{{ oracle_user }}",  slus: "{{ slussel }}" }
+       - { username: "{{ default_user }}", slus: "{{ slussel }}" }
+     when:
+       - dsthost is defined
+       - dstosid is defined
+     tags: 22_chkcred
+
+   - name: Add users to sudoers
+     template: src=../templates/sudoers.j2 dest='/bnp/sudo_controls/sudoers.d/{{ item.username }}_root' owner={{ root_user }} mode=0644
+     with_items:
+       - { username: "{{ oracle_user }}" }
+       - { username: "{{ default_user }}" }
+     when:
+       - dsthost is defined
+       - dstosid is defined
+     tags: 22_chkcred
+
+   - name: "Check directories: {{ mnt_orasoft_19 }},{{ oracle_user_home }},etc,etc"
+     stat:
+       path: "{{ item }}"
+     register: mkdirs
+     with_items:
+       - "{{ oracle_base }}"
+       - "{{ inventory_location }}"
+       - "{{ oracle_home_19000 }}"
+       - "{{ oracle_user_home }}"
+       - "{{ oracle_scripts_dir }}"
+       - "{{ mnt_adump }}"
+       - "{{ mnt_diag }}"
+       - "{{ mnt_archive }}"
+       - "{{ mnt_reco }}"
+       - "{{ mnt_redo }}"
+       - "{{ mnt_backup }}"
+       - "{{ mnt_control }}"
+       - "{{ mnt_checkpnts }}"
+       - "{{ mnt_dgconfig }}"
+       - "{{ mnt_stage }}/Oracle/Oracle190000"
+       - "{{ ansible_tmp_dir }}"
+     when:
+       - dsthost is defined
+       - dstosid is defined
+     tags: 23_chkoradirs
+
+   - name: "Create oracle-directories if they do not already exist"
+     file:
+       path: "{{ item.dest }}"
+       state: directory
+       owner: "{{ item.owner }}"
+       group: "{{ oracle_group }}"
+       mode: 0775
+     with_items:
+       - { owner: "{{ oracle_user }}"  , dest: "{{ oracle_base }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ inventory_location }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ oracle_home_19000  }}" }
+       - { owner: "{{ oracle_user }}" ,  dest: "{{ oracle_user_home }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ oracle_scripts_dir }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ mnt_adump }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ mnt_diag }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ mnt_archive }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ mnt_reco }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ mnt_redo }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ mnt_backup }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ mnt_control }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ mnt_checkpnts }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ mnt_dgconfig }}" }
+       - { owner: "{{ oracle_user }}"  , dest: "{{ ansible_tmp_dir }}" }
+     when: 
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip'
+     tags: 23_chkoradirs
+
+   - name: "Verify ownership : {{ mnt_tmp }} and {{ ansible_tmp_dir }}"
+     file:
+       dest: "{{ item }}"
+       state: directory
+       owner: "{{ root_user }}"
+       group: "{{ oracle_group }}"
+       mode: 0777
+       recurse: yes
+     with_items:
+       - "{{ mnt_tmp }}"
+       - "{{ ansible_tmp_dir }}"
+     when: 
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip'
+     tags: 23_chkoradirs 
+
+   - name: "Verify ownership of scripts in : {{ oracle_scripts_dir }}"
+     find:
+       paths: "{{ oracle_scripts_dir }}"
+       file_type: file
+       pattern: [ '*.sh,*.template,*.rsp' ]
+     register: scripts_found
+     when:
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip'
+     tags: 24_prepdb
+
+   - name: Parse out found scripts
+     set_fact:
+       oscripts: "{{ scripts_found | json_query('files[*].path') }}"
+     when:
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip'
+     tags: 24_prepdb
+
+   - name: Check ownership
+     file:
+       path: "{{ item }}"
+       state: file
+       owner: "{{ oracle_user }}"
+       group: "{{ oracle_group }}"
+       mode: 0775
+     loop: "{{ oscripts }}"
+     when:
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip'
+     ignore_errors: yes
+     tags: 24_prepdb
+
+   - name: "Copy dbca-response-template and change thresholds"
+     copy:
+       src: "{{ item.prof1 }}"
+       dest: "{{ item.dest }}"
+       owner: "{{ item.u }}"
+       group: "{{ item.grp }}"
+       mode: 0775
+     with_items:
+       - { u: "{{ oracle_user }}",grp: "{{ oracle_group }}",dest: '{{ oracle_scripts_dir }}/silent-DBONLY.rsp' ,prof1: '{{ rsp_templates_dir }}/silent-DBONLY.rsp.template' }
+       - { u: "{{ oracle_user }}",grp: "{{ oracle_group }}",dest: '{{ oracle_scripts_dir }}/New_Database.dbt'  ,prof1: '{{ rsp_templates_dir }}/New_Database.dbt.template' }
+     when: 
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip'
+     tags: 24_prepdb
+
+   - name: "Replacing parameters by values in the response-file {{ oracle_scripts_dir }}/silent-DBONLY.rsp "
+     replace:
+       path: "{{ oracle_scripts_dir }}/silent-DBONLY.rsp"
+       regexp: "{{ item.rexp }}"
+       replace: "{{ item.by }}"
+       backup: no
+     with_items:
+       - { rexp: '_OPTION',   by: "{{ vm_OPTION_DB }}"          }
+       - { rexp: '_SI_RACONE',by: "{{ dbca_instance_si }}"      }
+       - { rexp: '_PURPOSE',  by: "{{ DB_MLT }}"                }
+       - { rexp: '_SGATGT',   by: "{{ vm_db_ram }}"             }
+       - { rexp: '_GDB',      by: "{{ dstosid_global_name }}"   }
+       - { rexp: '_SID',      by: "{{ dstosid_SID }}"           }
+       - { rexp: '_UNIQUE',   by: "{{ dstosid_SID }}"           }
+       - { rexp: '_CDB',      by: "{{ CDB_N }}"                 }
+       - { rexp: '_CHAR',     by: "{{ vm_CHARSET }}"            }
+       - { rexp: '_AUTORAM',  by: "{{ AUT_RAM_N }}"             }
+       - { rexp: '_RECO',     by: "{{ RECO_Y }}"                }
+       - { rexp: '_STRGE',    by: "{{ dbca_storage_fs }}"       }
+       - { rexp: '_SAMPLES',  by: "{{ SAMPLES_Y }}"             }
+       - { rexp: '_PWDALL' ,  by: "{{ slussel_dbca }}"          }
+       - { rexp: '_DATADEST', by: "{{ mnt_data01 }}"            }
+       - { rexp: '_FRADEST',  by: "{{ mnt_reco }}"              }
+       - { rexp: '_LISTNAME', by: "{{ vm_LISTNAME }}"           }
+       - { rexp: '_PERCRAM',  by: "{{ vm_perc_ram_db }}"        }
+       - { rexp: '_SYSP',     by: "{{ slussel_sys }}"           }
+       - { rexp: '_SYSTEMP',  by: "{{ slussel_system }}"        }
+       - { rexp: '_COMPAT',   by: "{{ dstosid_compat }}"        }
+       - { rexp: '_DBNAM',    by: "{{ dstosid_db_name }}"       }
+       - { rexp: '_ADMP',     by: "{{ mnt_adump }}"             }
+       - { rexp: '_DIAG',     by: "{{ mnt_oradata }}"           }
+       - { rexp: '_ARCH',     by: "{{ mnt_archive }}"           }
+       - { rexp: '_XDBSERV',  by: "{{ dstosid_xdb_service }}"   }
+       - { rexp: '_OBASE' ,   by: "{{ mnt_orabase }}"           }
+       - { rexp: '_OHOME' ,   by: "{{ mnt_orasoft_19 }}"        }
+     when:
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip'
+     tags: 24_prepdb
+
+   - name: "Prepare Listener.ora file"
+     template: src=../templates/listener.xml.j2 dest={{ LISTENER_ORA }}  owner={{ oracle_user }} mode=0775
+     when:
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+     tags: 25_preplist
+
+   - name: "Prepare Tnsnames.ora file"
+     template: src=../templates/tnsnames.xml.j2 dest={{ TNSNAMES_ORA }}  owner={{ oracle_user }} group={{ oracle_group }} mode=0775
+     when:
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+     tags: 26_preptns
+
+   - name: Check for LISTENER-processes {{ vm_LISTNAME }} from previous installations
+     ignore_errors: true
+     shell: "ps -fu {{ oracle_user }} | grep {{ vm_LISTNAME }} | grep -v grep | awk '{print $2}'"
+     register: lsnr_processes
+     when: 
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+     tags: 27_statelist
+
+   - name: Kill LISTENER-processes from previous installations
+     ignore_errors: yes
+     shell: "kill {{ item }}"
+     with_items: "{{ lsnr_processes.stdout_lines }}"
+     tags: 27_statelist
+
+   - wait_for:
+       path: "/proc/{{ item }}/status"
+       state: absent
+     with_items: "{{ lsnr_processes.stdout_lines }}"
+     ignore_errors: yes
+     register: stubbornly_processes
+     tags: 27_statelist
+
+   - name: "Start again Listener LISTENER_{{ dstosid_SID }} before creating the Database {{ dstosid_SID }} "
+     become: true
+     become_user: "{{ root_user }}"
+     shell: |
+       {{ STRT_LIST }}
+     when:
+       - dsthost is defined
+       - type is defined
+     tags: 27_startlist
+
+   - name: "Status Listener LISTENER_{{ dstosid_SID }} before creating the Database {{ dstosid_SID }} "
+     become: true
+     become_user: "{{ root_user }}"
+     shell: |
+       {{ STAT_LIST }}
+     when:
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - type is defined
+     tags: 27_startlist
+
+   - name: Copy tnsnames from Oracle-server to ansible node {{ ctlhost }}
+     template: src=../templates/tnsnames.xml.j2 dest={{ TNSNAMES_ORA }}  owner={{ oracle_user }} group={{ oracle_group }} mode=0775
+     when:
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+     tags: 29_preptns_cli
+
+   - name: "Looking up {{ dstosid_SID }} already in {{ oratab_file }}"
+     register: absence 
+     lineinfile:
+       path: "{{ oratab_file }}"
+       state: absent
+       regexp: '^{{ dstosid_SID }}'
+     tags: 30_createdb
+
+   - name: "Check if {{ dstosid_SID }} is already in {{ oratab_file }}"
+     debug: msg="Attention ! The database to be created {{ dstosid_SID }} is already in {{ oratab_file }} , comment or remove it"
+     when: absence is changed
+     tags: 30_createdb
+
+   - name: "Creating Database: {{ dstosid_SID }} of type : {{ dbca_instance_si }}"
+     become: true
+     become_user: "{{ oracle_user }}"
+     shell: |
+       {{ INST_DB }}
+     register: database_create
+     when:
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip'
+     failed_when: "'Database creation complete' not in database_create.stdout"
+     tags: 30_createdb
+
+   - name: Creating Database - stage 1
+     stat: 
+       path: "{{ vm_CREDB_SH }}"
+     register: credb
+     when: 
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+       - type == 'rpm'
+     tags: 30_createdb
+
+   - name: Creating Database - stage 2
+     shell: "{{ vm_CREDB_SH }} configure"
+     when: 
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+       - type == 'rpm'
+     tags: 30_createdb
+
+   - name: Validate the newly created Database by querying V$DATABASE
+     become_user: "{{ oracle_user }}"
+     become_method: sudo
+     no_log: no
+     shell:
+       cmd: |
+         export ORACLE_HOME={{ oracle_home_19000 }}; export ORACLE_SID={{ dstosid_SID }}; export PATH=$PATH:$ORACLE_HOME/bin;
+         {{ oracle_home_19000 }}/bin/sqlplus -S / as sysdba <<EOF
+         set feedback off
+         set heading off
+         SET SERVEROUTPUT ON SIZE 5000;
+         SET LINESIZE 2500;
+         set pagesize 5000;
+         set long 5000;
+         alter system register;
+         select json_object('db_name' VALUE NAME,'db_cdb' VALUE CDB,'db_created' VALUE CREATED,'db_mode' VALUE OPEN_MODE,'db_role' VALUE DATABASE_ROLE) from v\$database;
+         alter user system identified by {{ slussel }};
+         EOF
+     when: 
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     register: simple_out
+     tags: 31_validate_db
+
+   - name: Transform response
+     set_fact:
+       simple_json: "{{ simple_out.stdout|from_json }}"       
+     when: dsthost is defined and dstosid is defined 
+     tags: 31_validate_db
+
+   - name: Show result
+     debug:
+       var: simple_json
+     when: dsthost is defined and dstosid is defined 
+     tags: 31_validate_db
+
+   - name: Creating database {{ dstosid_SID }} with response_file {{ oracle_scripts_dir }}/silent-DBONLY.rsp
+     oracle_db:
+       hostname: "{{ dsthost }}"
+       state: present
+       db_name: "{{ dstosid_db_name }}"
+       sid: "{{ dstosid_SID |default(omit) }}"
+       db_unique_name: "{{ dstosid_SID |default(omit) }}"
+       sys_password: "{{ slussel_sys }}"
+       system_password: "{{ slussel_system }}"
+       responsefile: "{{ dbca_rsp |default(omit) }}"
+       cdb: "{{ vm_CDB |default (omit)}}"
+       initparams: "{{ initparameters |default(omit)}}"
+       datafile_dest: "{{ mnt_data01 }}"
+       recoveryfile_dest: "{{ mnt_reco }}"
+       storage_type: "{{ dbca_storage_fs }}"
+       dbconfig_type: "{{ dbca_instance_si }}"
+       amm: False
+       memory_totalmb: "{{ vm_db_ram }}"
+     environment: "{{ oracle_env }}"
+     register: _
+     failed_when: _.changed == false
+     when:
+       - dsthost is defined
+       - dsthost in groups['primnodes']
+       - dstosid is defined
+       - type is defined
+       - type == 'tar' or type == 'zip' or type == 'rpm'
+     run_once: True
+     tags:
+       - never
+
+   - name: Create/drop oracle-directory on the managed-oracle-node,using ansible_oracle_modules on the ansible_engine 
+     oracle_directory:
+       hostname: "{{ dsthost }}"
+       service_name: "{{ dstosid }}"
+       username: "{{ system_user }}"
+       password: "{{ slussel }}"
+       directory_name: dir_silent
+       directory_path: /data/imp
+       state: present
+     delegate_to: "{{ ctlhost }}"
+     register: _
+     failed_when: _.changed == false
+     when: ctlhost is defined and dsthost is defined and dstosid is defined
+     tags:
+       - never
+
+   - name: Create/drop user/schema on the managed-oracle-node,using ansible_oracle_modules on the ansible_engine
+     oracle_user:
+       hostname: "{{ dsthost }}"
+       service_name: "{{ dstosid }}"
+       username: "{{ system_user }}"
+       password: "{{ slussel }}"
+       schema_name: ansible_silent
+       schema_password: "{{ slussel }}"
+       default_tablespace: users
+       state: present
+     delegate_to: "{{ ctlhost }}"
+     register: _
+     failed_when: _.changed == false
+     when: ctlhost is defined and dsthost is defined and dstosid is defined
+     tags:
+       - never
+
+   - name: Grant/revoke privileges to/from user on managed-oracle-node,using ansible_oracle_modules on the ansible_engine
+     oracle_grant:
+       hostname: "{{ dsthost }}"
+       service_name: "{{ dstosid }}"
+       username: "{{ system_user }}"
+       password: "{{ slussel }}"
+       grantee: ansible_silent
+       mode:    normal
+       privileges:
+           - "create session"
+           - "create table"
+       state: present
+     delegate_to: "{{ ctlhost }}"
+     register: _
+     failed_when: _.changed == false
+     when: ctlhost is defined and dsthost is defined and dstosid is defined
+     tags: 
+       - never
