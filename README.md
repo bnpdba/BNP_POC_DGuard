@@ -14,7 +14,7 @@ In the repo,there is 1 ansible-config file that should be located under:
 ==> /home/ansible/BNP/ANSIBLE_CFG/ansible.cfg
 
 
-#ansible-inventory
+ansible-inventory
 =
 /home/ansible/BNP/ORAPROV_ANSIBLE/inventory/poc/hosts
 =
@@ -82,17 +82,10 @@ ansible_ssh_common_args='-o StrictHostKeyChecking=no'
 host_key_checking = False
 host_key_check = False
 
-# Use the stdout_callback when running ad-hoc commands.
-# Use the YAML callback plugin.
 stdout_callback = yaml
 bin_ansible_callbacks = True
 callback_whitelist = profile_tasks
 
 [ssh_connection]
-# ssh arguments to use
 ssh_args = -o StrictHostKeyChecking=no
 scp_if_ssh = smart
-
-
-
-
