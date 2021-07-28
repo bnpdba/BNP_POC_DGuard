@@ -17,7 +17,7 @@ In the repo,there is 1 ansible-config file that should be located under:
 #ansible-inventory
 =================
 /home/ansible/BNP/ORAPROV_ANSIBLE/inventory/poc/hosts (also part of this dguard-repo)
-======================================================================================
+
 PS: All mentioned hostnames below are only "fictive" names just for demo & poc purposes !!
 
 [all]
@@ -48,7 +48,7 @@ orapoc02
 #ansible-config file
 ===================
 The above hosts file is referenced in another ansible-type of file (Configuration File , see below and part of this dguard-repo)
-================================================================================================================================
+
 /home/ansible/BNP/ANSIBLE_CFG/ansible.cfg
 =========================================
 [defaults]
