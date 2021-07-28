@@ -1,15 +1,21 @@
 # dguard (DataGuard with dg-broker on a 2-node Primary/Standby setup with Oracle 19c/Redhat 7.9
 Centralised playbooks,includes,roles,templates,etc... for easing the setup of a DataGuard-Setup
 
-There are currenly 2 .yaml ansible-playbooks.
-All different *.xml.j2 files which are json-templates used in yaml-playbooks
+In the repo,there are currenly 2 .yaml ansible-playbooks ( oraswdb-install_19c.yaml & dataguard_prepare_19c.yaml)
 
-There is 1 ansible-inventory (alias /etc/ansible/hosts) that should be located under
+In the repo,there are different *.xml.j2 files which are json-templates used in yaml-playbooks
+
+In the repo,there is 1 ansible-inventory (alias /etc/ansible/hosts) that should be located under:
 ==> /home/ansible/BNP/ORAPROV_ANSIBLE/inventory/poc/hosts
-
 This file is a etc-host-like file to give each host a special group/role within ansible
 The active inventory is listed below and acts as the one used for a DataGuard-POC with Oracle 19c on RedHat Linux 7.9
 
+In the repo,there is 1 ansible-config file that should be located under:
+==> /home/ansible/BNP/ANSIBLE_CFG/ansible.cfg
+
+
+#ansible-inventory
+=================
 /home/ansible/BNP/ORAPROV_ANSIBLE/inventory/poc/hosts (also part of this dguard-repo)
 ======================================================================================
 PS: All mentioned hostnames below are only "fictive" names just for demo & poc purposes !!
@@ -39,6 +45,8 @@ ctlpoc60
 orapoc01
 orapoc02
 
+#ansible-config file
+===================
 The above hosts file is referenced in another ansible-type of file (Configuration File , see below and part of this dguard-repo)
 ================================================================================================================================
 /home/ansible/BNP/ANSIBLE_CFG/ansible.cfg
