@@ -14,7 +14,7 @@ In the repo,there is 1 ansible-config file that should be located under:
 ==> /home/ansible/BNP/ANSIBLE_CFG/ansible.cfg
 
 
-ansible-inventory
+ansible-inventory file
 =
 /home/ansible/BNP/ORAPROV_ANSIBLE/inventory/poc/hosts
 =
