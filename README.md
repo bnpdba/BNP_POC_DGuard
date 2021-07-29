@@ -1,11 +1,8 @@
+# DataGuard with dg-broker on a 2-node Primary/Standby setup with Oracle 19c/Redhat 7.9
 
 ![afbeelding](https://user-images.githubusercontent.com/88084526/127451709-740f9f29-6597-4472-bbe1-0788e927151b.png)
 
-
-
-
-
-# DataGuard with dg-broker on a 2-node Primary/Standby setup with Oracle 19c/Redhat 7.9
+# Repo contents
 Centralised playbooks,includes,roles,templates,etc... for easing the setup of a DataGuard-Setup
 
 In the repo,there are currenly 2 .yaml ansible-playbooks ( oraswdb-install_19c.yaml & dataguard_prepare_19c.yaml)
