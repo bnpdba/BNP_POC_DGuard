@@ -1,3 +1,10 @@
+
+![afbeelding](https://user-images.githubusercontent.com/88084526/127451709-740f9f29-6597-4472-bbe1-0788e927151b.png)
+
+
+
+
+
 # DataGuard with dg-broker on a 2-node Primary/Standby setup with Oracle 19c/Redhat 7.9
 Centralised playbooks,includes,roles,templates,etc... for easing the setup of a DataGuard-Setup
 
