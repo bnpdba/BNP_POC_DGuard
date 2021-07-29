@@ -1,4 +1,4 @@
-# DataGuard with dg-broker on a 2-node Primary/Standby setup with Oracle 19c/Redhat 7.9
+# DataGuard with broker on a Primary/Standby setup with Oracle 19.12/Redhat 7.9 (BNP Fortis)
 
 ![afbeelding](https://user-images.githubusercontent.com/88084526/127451709-740f9f29-6597-4472-bbe1-0788e927151b.png)
 
