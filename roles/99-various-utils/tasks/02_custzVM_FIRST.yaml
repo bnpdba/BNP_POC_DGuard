@@ -1,0 +1,127 @@
+---
+ - hosts: "{{ dsthost }}"
+   name: ": 03_custzVM and configure the new VM:{{ dsthost }}"
+
+   vars_files:
+     - "/home/ansible/BNP/ORAPROV_ANSIBLE/vars/prepoc.global.yml"
+
+   become: yes
+   become_user: "{{ root_user }}"
+
+   environment:
+       LIBGUESTFS_BACKEND: direct
+
+   tasks:
+
+   - name: Check for correct OS family
+     command: echo "Oké , the OS is {{ item }}"
+     with_items:
+       - RedHat
+     when: ansible_os_family == item
+     ignore_errors: True
+
+   - name: "Update VM-hostname to {{ dsthost_fqdn }}"
+     hostname:
+       name: "{{ item }}"
+     with_items:
+       - "{{ dsthost_fqdn }}"
+
+  ###########################################
+  # Prepare and mount required NAS-mounts   #
+  ###########################################
+
+   - name: "Ping Servers"
+     command: echo "{{ item }}" && ping -c1 {{ item }}
+     register: ping_ret
+     with_items:
+       - "{{ nas_host }}"
+       - "{{ yum_oracle }}"
+
+   - name: Check NAS-mountpoint/directory has been created
+     stat:
+       path: "{{ item }}"
+     register: nfs_mountp
+     with_items:
+       - "{{ nas_soft_mnt }}"
+
+   - name: Check wheter the NFS-mountpoint:{{ nas_soft_mnt }} is available for mounting
+     stat:
+       path: "{{ nas_soft_mnt }}"
+     register: nfs_mountp
+
+   - name: Mounting {{ nas_soft }} with mountpoint {{ nas_soft_mnt }} , if not already done
+     mount:
+       src: "{{ nas_soft }}"
+       path: "{{ nas_soft_mnt }}"
+       opts: rw,sync,hard,intr
+       fstype: nfs
+       state: mounted
+     register: nfs_mounted
+
+   - name: "Copy root-profile and - settings"
+     copy:
+       src: "{{ item.prof1 }}"
+       dest: "{{ item.dest }}"
+       owner: "{{ item.username }}"
+       group: "{{ item.group }}"
+       mode: 0755
+     with_items:
+       - { username: "{{ root_user }}" , group: "{{ root_group }}"     , dest: "{{ root_user_home }}", prof1: '{{ scripts_templates_dir }}/root/.profile' }
+       - { username: "{{ root_user }}" , group: "{{ root_group }}"     , dest: "{{ root_user_home }}", prof1: '{{ scripts_templates_dir }}/root/.bash_profile' }
+
+   - name: "Since this is a plain {{ ansible_distribution }} , we will have to install Oracle Public repos."
+     yum_repository:
+       name: "{{ item.entry }}"
+       file: "{{ item.filename }}"
+       description: "{{ item.descr }}"
+       baseurl: "{{ item.base }}"
+       gpgcheck: false
+       enabled: true
+     with_items:
+       - { entry: 'ol7_latest'          , filename: 'public-yum-oracle7' , descr: 'Oracle Linux Latest'                , base: 'https://yum.oracle.com/repo/OracleLinux/OL7/latest/$basearch/'  }
+       - { entry: 'ol7_optional_latest' , filename: 'public-yum-oracle7' , descr: 'Oracle Linux Optional Latest'       , base: 'https://yum.oracle.com/repo/OracleLinux/OL7/optional/latest/$basearch/' }
+       - { entry: 'ol7_addons'          , filename: 'public-yum-oracle7' , descr: 'Oracle Linux Add ons'               , base: 'https://yum.oracle.com/repo/OracleLinux/OL7/addons/$basearch/' }
+       - { entry: 'ol7_developer_EPEL'  , filename: 'public-yum-oracle7' , descr: 'Oracle Linux Development Packages ' , base: 'https://yum.oracle.com/repo/OracleLinux/OL7/developer_EPEL/$basearch/' }
+
+   - name: "YUM: Install BASIC packages before starting Oracle-install"
+     yum:
+       name: "{{ basic_packages }}"
+       state: installed
+     when:
+       - ansible_system == 'Linux'
+       - ansible_distribution in ['RedHat']
+       - ansible_distribution_major_version in ['7','8']
+     ignore_errors: yes
+     tags: instbasic
+
+   - name: "RPM: First install the preinst-rpm: {{ preinst_19 }}"
+     command: rpm -U "{{ preinst_19_rpm }}"
+     args:
+       warn: false
+     when:
+       - ansible_system == 'Linux'
+       - ansible_distribution in ['RedHat']
+       - ansible_distribution_major_version in ['7','8']
+     register: preprpm
+     ignore_errors: yes
+     tags: pre19c
+
+   - name: "YUM: Install ORACLE-REQUIRED packages before starting Oracle-install"
+     yum:
+       name: "{{ oracle_packages }}"
+       state: latest
+     ignore_errors: True
+     tags: instora 
+
+   - name: "List installed extra packages"
+     yum:
+       list: "{{ item }}"
+       state: present
+     register: yumresult
+     with_items:
+       - "{{ oracle_packages }}"
+
+   - name: Display installed Packages
+     debug:
+       msg: |
+         "{{ yumresult }}"

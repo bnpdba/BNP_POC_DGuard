@@ -1,0 +1,16 @@
+# Oracle Settings
+export TMP=/tmp
+export TMPDIR=$TMP
+
+export ORACLE_HOSTNAME={{ server_stdby }}
+export ORACLE_BASE={{ oracle_base }}
+export ORACLE_HOME={{ oracle_home_19000 }}
+export ORACLE_SID={{ dstosid_SID_stby }}
+export DATA_DIR={{ mnt_oradata }}
+export ORA_INVENTORY=$ORACLE_BASE/oraInventory
+
+export PATH=/usr/sbin:/usr/local/bin:$PATH
+export PATH=$ORACLE_HOME/bin:$PATH
+
+export LD_LIBRARY_PATH=$ORACLE_HOME/lib:/lib:/usr/lib
+export CLASSPATH=$ORACLE_HOME/jlib:$ORACLE_HOME/rdbms/jlib

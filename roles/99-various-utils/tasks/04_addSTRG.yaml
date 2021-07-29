@@ -1,0 +1,165 @@
+---
+ - hosts: "{{ dsthost }}"
+   name: "04_addSTRG - AddStorage to LVM : PV's - VG's - LV's AND some NFS-filesystems"
+
+   vars_files:
+     - "/home/yves/BNP/ORAPROV_ANSIBLE/vars/prepoc.global.yml"
+
+   become: yes
+   become_user: "{{ root_user }}"
+   gather_facts: true
+
+   tasks:
+
+   - name: Check for correct OS family 
+     command: echo "Oké , the OS is "{{ item }}" "
+     with_items:
+       - RedHat
+     when: ansible_os_family == item 
+
+   - debug:
+       msg: "{{ item.item_label }} : {{ item.item_var }}"
+     with_items:
+       - { item_label: Hostname, item_var: "{{ hostvars[inventory_hostname].ansible_nodename }}" }
+       - { item_label: System,   item_var: "{{ hostvars[inventory_hostname].ansible_system }}" }
+       - { item_label: Real OS,  item_var: "{{ hostvars[inventory_hostname].ansible_distribution }}" }
+       - { item_label: OS_fam,   item_var: "{{ hostvars[inventory_hostname].ansible_os_family }}" }
+       - { item_label: vCPU,     item_var: "{{ hostvars[inventory_hostname].ansible_processor_vcpus }}" }
+       - { item_label: RAM,      item_var: "{{ hostvars[inventory_hostname].ansible_memtotal_mb }}" }
+       - { item_label: Swap,     item_var: "{{ hostvars[inventory_hostname].ansible_swaptotal_mb }}" }
+       - { item_label: Kernel,   item_var: "{{ hostvars[inventory_hostname].ansible_kernel }}" }
+       - { item_label: Dist_vers,item_var: "{{ hostvars[inventory_hostname].ansible_distribution_version }}" }
+
+   - name: Check if firewall is installed
+     yum: list={{firewall_service}} disablerepo=*
+     when: disable_firewall and ansible_os_family == 'RedHat'
+     register: firewall
+
+   - name: Disable firewall
+     service: name={{ firewall_service }} state=stopped enabled=no
+     when: disable_firewall and ansible_os_family == 'RedHat' and firewall.results
+     register: iptables
+
+   - name: Disable selinux (permanently)
+     selinux: state=disabled
+     when: disable_selinux and ansible_os_family == 'RedHat'
+     register: selinux
+
+   - name: Disable selinux (runtime)
+     shell: setenforce 0
+     when: disable_selinux and ansible_os_family == 'RedHat'
+     changed_when: disable_selinux_runtime.rc == 0
+     failed_when: disable_selinux_runtime.rc > 0 and "SELinux is disabled" not in disable_selinux_runtime.stderr
+     register: disable_selinux_runtime
+
+   - name: volume group creations
+     lvg:
+       vg: "{{ item.vgname }}"
+       pvs: "{{ item.pvname }}"
+     with_items:
+       - { vgname: "{{ vg_tmp }}",      pvname: "{{ pv_tmp }}"}
+       - { vgname: "{{ vg_swap }}",     pvname: "{{ pv_swap }}"}
+       - { vgname: "{{ vg_orasoft }}",  pvname: "{{ pv_orasoft }}"}
+       - { vgname: "{{ vg_oradata }}",  pvname: "{{ pv_oradata }}"}
+
+   - name: logical volume creations
+     lvol:
+       vg: "{{ item.vgname }}"
+       lv: "{{ item.lvname }}"
+       size: "{{ item.lvsize }}"
+     with_items:
+       - { vgname: "{{ vg_tmp }}",      lvname: "{{ lv_tmp }}",         lvsize: "{{ size_tmp }}"}
+       - { vgname: "{{ vg_swap }}",     lvname: "{{ lv_swap }}",        lvsize: "{{ size_swap }}"}
+       - { vgname: "{{ vg_orasoft }}",  lvname: "{{ lv_orasoft_19 }}",  lvsize: "{{ size_orasoft_19 }}"}
+       - { vgname: "{{ vg_oradata }}",  lvname: "{{ lv_data01 }}",      lvsize: "{{ size_data01 }}"}
+       - { vgname: "{{ vg_oradata }}",  lvname: "{{ lv_data80 }}",      lvsize: "{{ size_data80 }}"}
+       - { vgname: "{{ vg_oradata }}",  lvname: "{{ lv_data81 }}",      lvsize: "{{ size_data81 }}"}
+       - { vgname: "{{ vg_oradata }}",  lvname: "{{ lv_admin }}",       lvsize: "{{ size_admin }}"}
+       - { vgname: "{{ vg_oradata }}",  lvname: "{{ lv_archive }}",     lvsize: "{{ size_archive }}"}
+       - { vgname: "{{ vg_oradata }}",  lvname: "{{ lv_reco }}",        lvsize: "{{ size_reco }}"}
+
+   - name: Create the xfs-filesystems
+     filesystem:
+       fstype: "{{ item.fstype }}"
+       dev: "{{ item.devname }}"
+     with_items:
+       - { fstype: "{{ fstype_tmp }}",         devname: "{{ dev_tmp }}"}
+       - { fstype: "{{ fstype_orasoft_19 }}",  devname: "{{ dev_orasoft_19 }}"}
+       - { fstype: "{{ fstype_data01 }}",      devname: "{{ dev_data01 }}"}
+       - { fstype: "{{ fstype_data80 }}",      devname: "{{ dev_data80 }}"}
+       - { fstype: "{{ fstype_data81 }}",      devname: "{{ dev_data81 }}"}
+       - { fstype: "{{ fstype_admin }}",       devname: "{{ dev_admin }}"}
+       - { fstype: "{{ fstype_archive }}",     devname: "{{ dev_archive }}"}
+       - { fstype: "{{ fstype_reco }}",        devname: "{{ dev_reco }}"}
+
+   - name: Check wheter all mountpoints are available for mounting
+     file:
+       path: "{{ item }}"
+       state: directory
+     with_items:
+       - "{{ nas_soft_mnt }}"
+       - "{{ mnt_tmp }}"
+       - "{{ mnt_orasoft_19 }}"
+       - "{{ mnt_adump }}"
+       - "{{ mnt_pfile }}"
+       - "{{ mnt_diag }}"
+       - "{{ mnt_scripts }}"
+       - "{{ mnt_data01 }}"
+       - "{{ mnt_data80 }}"
+       - "{{ mnt_data81 }}"
+       - "{{ mnt_archive }}"
+       - "{{ mnt_reco }}"
+       - "{{ mnt_checkpnts }}"
+       - "{{ mnt_dgconfig }}"
+
+   - name: mount all logical volumes
+     mount:
+       name: "{{ item.mountp }}"
+       src: "{{ item.devname }}"
+       fstype: "{{ item.type }}"
+       opts: noatime
+       state: mounted
+     with_items:
+       - { mountp: "{{ mnt_tmp }}",        devname: "{{ dev_tmp }}",         type: "{{ fstype_tmp }}"}
+       - { mountp: "{{ mnt_orasoft_19 }}", devname: "{{ dev_orasoft_19 }}",  type: "{{ fstype_orasoft_19 }}"}
+       - { mountp: "{{ mnt_data01 }}",     devname: "{{ dev_data01 }}",      type: "{{ fstype_data01 }}"}
+       - { mountp: "{{ mnt_data80 }}",     devname: "{{ dev_data80 }}",      type: "{{ fstype_data80 }}"}
+       - { mountp: "{{ mnt_data81 }}",     devname: "{{ dev_data81 }}",      type: "{{ fstype_data81 }}"}
+       - { mountp: "{{ mnt_archive }}",    devname: "{{ dev_archive }}",     type: "{{ fstype_archive }}"}
+       - { mountp: "{{ mnt_reco }}",       devname: "{{ dev_reco }}",        type: "{{ fstype_reco }}"}
+
+  ###########################################
+  # Prepare and activate the SWAP           #
+  ###########################################
+
+   - name: Format the swap-device
+     command: mkswap "{{ dev_swap }}"
+     when: ansible_swaptotal_mb < 128
+     tags: mkswap
+
+   - name: Activate the swap-device
+     command: swapon "{{ dev_swap }}"
+     when: ansible_swaptotal_mb < 128
+     tags: mkswap
+
+  ###########################################
+  # Prepare and mount required NAS-mounts   #
+  ###########################################
+
+   - name: Ping the NAS-server:{{ nas_ip }}
+     command: ping -c1 {{ nas_ip }}
+     register: ping_ret
+    
+   - name: Check wheter the NFS-mountpoint:{{ nas_soft_mnt }} is available for mounting 
+     when: nfs_mountp.stat.isdir is not defined and ping_ret is success
+     stat:
+       path: "{{ nas_soft_mnt }}"
+     register: nfs_mountp
+
+   - name: Mounting {{ nas_soft }} with mountpoint {{ nas_soft_mnt }} , if not already done
+     mount: 
+       src: "{{ nas_soft }}"
+       path: "{{ nas_soft_mnt }}"
+       fstype: nfs
+       state: mounted
+     when: nfs_mountp.stat.path != nas_soft_mnt and ping_ret is success
