@@ -5,7 +5,8 @@
 ![afbeelding](https://user-images.githubusercontent.com/88084526/127454258-76309a1c-a5ad-40a0-9fae-5948b5c35e70.png)
 
 
-# Repo contents
+Repo contents
+=
 Centralised playbooks,includes,roles,templates,etc... for easing the setup of a DataGuard-Setup
 
 In the repo,there are currenly 2 .yaml ansible-playbooks ( oraswdb-install_19c.yaml & dataguard_prepare_19c.yaml)
