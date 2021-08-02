@@ -5,6 +5,8 @@ Repo-link : https://github.com/bnpdba/BNP_POC_DGuard
 #
 
 
+![afbeelding](https://github.com/bnpdba/BNP_POC_DGuard/blob/1d0eb9e3a5ec66366f17b28760587b3665ed55d4/xdoc/99_Various/BNP%20DGuard%20in%20Active%20and%20Passive%20Mode.png)
+
 ![afbeelding](https://user-images.githubusercontent.com/88084526/127454258-76309a1c-a5ad-40a0-9fae-5948b5c35e70.png)
 
 
