@@ -1,4 +1,4 @@
-# 05/08/2021 DG Oracle 19.12/Redhat 7.9 (BNP Fortis)
+# BNP Fortis : Github Repo for Oracle DataGuard v19.12/Redhat 7.9 (08/2021)
 
 Repo-link : https://github.com/bnpdba/BNP_POC_DGuard 
 (credentials:LIST.MIDDLEWARESQUADUNIXLINUXDATABASES@bnpparibasfortis.com/*********)
