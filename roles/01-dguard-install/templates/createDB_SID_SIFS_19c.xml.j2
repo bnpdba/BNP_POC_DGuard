@@ -18,7 +18,7 @@ fi
 export ORACLE_BASE={{ vm_OBASE }}
 export ORACLE_HOME={{ vm_OHOME }}
 export ORACLE_VERSION={{ vm_OVERS }}
-export ORACLE_SID={{ dstosid }}
+export ORACLE_SID={{ dbprim }}
 export TEMPLATE_NAME={{ vm_OTEMPL }}
 export CHARSET={{ vm_CHARSET }}
 export PDB_NAME={{ vm_OPDB1 }}
@@ -34,7 +34,7 @@ DBCA=$ORACLE_HOME/bin/dbca
 NETCA=$ORACLE_HOME/bin/netca
 ORACLE_OWNER=oracle
 RETVAL=0
-CONFIG_NAME=createDB_{{ dstosid }}_SIFS_{{ vm_OVERS }}.conf
+CONFIG_NAME=createDB_{{ dbprim }}_SIFS_{{ vm_OVERS }}.conf
 CONFIGURATION="/etc/sysconfig/$CONFIG_NAME"
 
 # Commands

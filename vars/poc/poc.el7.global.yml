@@ -121,10 +121,12 @@
   mnt_data81:     "/oradata/data_81"
   mnt_archive:    "/oradata/archive"
   mnt_reco:       "/oradata/fast_recovery_area"
-  mnt_redo:       "/oradata/fast_recovery_area/{{ dstosid_SID }}"
+  mnt_redo:       "/oradata/onlinelog"
   mnt_control:    "/oradata/fast_recovery_area/control"
   mnt_dgconfig:   "/oradata/DATAGUARDCONFIG"
   mnt_backup:     "/oradata/backup/rman"
+
+  hosts_invent:   "/home/ansible/BNP_POC_DGuard/inventory/poc/hosts"
 
   dbprim_ext:     "{% for host in groups['primnodes']  %} {{ hostvars[host]['dbname'] }} {% endfor %}"
   dbstby_ext:     "{% for host in groups['stbynodes'] %} {{ hostvars[host]['dbname'] }} {% endfor %}"
@@ -132,6 +134,7 @@
   dbprim: "{{ dbprim_ext|trim}}"
   dbstby: "{{ dbstby_ext|trim}}"
 
+  xdb_service:              "{{ dbprim }}XDB"
   dstosid_SID:              "{{ dbprim }}"
   dstosid_db_name:          "{{ dbprim }}"
   dstosid_global_name:      "{{ dbprim }}"
@@ -142,7 +145,8 @@
   dstosi_reco_size:         "40G"
 
   dstosid_type_db: SI
-  dstosid_compat: "19.0.0"
+#  dstosid_compat: "19.0.0"
+  dstosid_compat: "19.12.0"
 
   oracle_uid: 8000
   oracle_user: oracle
@@ -204,7 +208,8 @@
 # VM-Oracle-Creation specific parameters TO BE FILLED-IN OR REPLACED before launching 04-preprDB.yaml
 # VM-Oracle-Creation specific parameters TO BE FILLED-IN OR REPLACED before launching 04-preprDB.yaml
 ########################################################################################################
-  vm_LISTNAME:     "LISTENER_{{ dstosid_SID }}"
+# vm_LISTNAME:     "LISTENER_{{ dstosid_SID }}"
+  vm_LISTNAME:     "LISTENER"
   vm_LSNRPORT:     '1521'
   vm_EXPRESSPORT:  '5500'
   vm_CHARSET:      AL32UTF8
@@ -338,6 +343,7 @@
   install_os_packages: true
 #  device_persistence:  asmlib
   disable_selinux:     true
+  disable_ntpd:        true
   disable_firewall:    false
   extrarepos_enabled:  
   extrarepos_disabled: 
@@ -363,6 +369,7 @@
     - 3.europe.pool.ntp.org
   chrony_config_logdir: /var/log/chrony
   chrony_config_extra_options: {}
+  chrony_enable: yes
 
 
   firewall_service: "{% if ansible_distribution_major_version|int==6%}iptables{%elif ansible_distribution_major_version|int==7 %}firewalld{% else %}0{% endif %}"
@@ -457,14 +464,16 @@
   CTL_TNS_ADMIN: "{{ client_home_19000 }}/network/admin"
   DB_TNS_ADMIN:  "{{ oracle_home_19000 }}/network/admin"
 
-  LISTENER_ORA:  "{{ oracle_home_19000 }}/network/admin/listener.ora"
-  LIST_TPL:      "/home/ansible/BNP/ORAPROV_ANSIBLE/roles/10-Install_Uninstall/templates/listener.xml.j2"
-  LIST_DRP_TPL:  "/home/ansible/BNP/ORAPROV_ANSIBLE/roles/10-Install_Uninstall/templates/listenerDRP.xml.j2"
+  LISTENER_ORA:   "{{ oracle_home_19000 }}/network/admin/listener.ora"
+  LISTENER_STBY:  "{{ oracle_home_19000 }}/network/admin/listener.stby"
+  LIST_TPL:       "/home/ansible/BNP/ORAPROV_ANSIBLE/roles/10-Install_Uninstall/templates/listener.xml.j2"
+  LIST_DRP_TPL:   "/home/ansible/BNP/ORAPROV_ANSIBLE/roles/10-Install_Uninstall/templates/listenerDRP.xml.j2"
 
-  TNSNAMES_ORA:  "{{ oracle_home_19000 }}/network/admin/tnsnames.ora"
-  TNS_TPL:       "/home/ansible/BNP/ORAPROV_ANSIBLE/roles/10-Install_Uninstall/templates/tnsnames.xml.j2"
+  TNSNAMES_ORA:   "{{ oracle_home_19000 }}/network/admin/tnsnames.ora"
+  TNSNAMES_STBY:  "{{ oracle_home_19000 }}/network/admin/tnsnames.stby"
+  TNS_TPL:        "/home/ansible/BNP/ORAPROV_ANSIBLE/roles/10-Install_Uninstall/templates/tnsnames.xml.j2"
 
-  SQLNET_ORA:    "{{ oracle_home_19000 }}/network/admin/sqlnet.ora"
+  SQLNET_ORA:     "{{ oracle_home_19000 }}/network/admin/sqlnet.ora"
 
 # Cloning procs are depreciated and should be replaced by untar,unzip followed by a runinst with software-only
 # Cloning procs are depreciated and should be replaced by untar,unzip followed by a runinst with software-only
@@ -496,7 +505,7 @@
 
 #  DUP_PRIM_2_STBY: "{{ oracle_home_19000 }}/bin/dbca -J-Djava.io.tmpdir={{ oracle_user_home }}/tmp -silent -createDuplicateDB -gdbName {{ dstosid_SID_stby }} -primaryDBConnectionString {{ server_prim }}:{{ vm_LSNRPORT }}/{{ dstosid_SID }} -sysPassword {{ slussel_sys }} -sid {{ dstosid_SID_stby }} -initParams db_name={{ dstosid_SID }} -createAsStandby -adminManaged -databaseConfigType SINGLE -dbUniqueName {{ dstosid_SID_stby }}"
 
-  DUP_PRIM_2_STBY: "{{ oracle_home_19000 }}/bin/dbca -J-Djava.io.tmpdir={{ oracle_user_home }}/tmp -silent -createDuplicateDB -gdbName {{ dstosid_SID_stby }} -primaryDBConnectionString {{ dsthost }}:{{ vm_LSNRPORT }}/{{ dstosid_SID }} -sysPassword {{ slussel_sys }} -sid {{ dstosid_SID_stby }} -initParams db_name={{ dstosid_SID }} -createAsStandby -adminManaged -databaseConfigType SINGLE -dbUniqueName {{ dstosid_SID_stby }}"
+  DUP_PRIM_2_STBY: "{{ oracle_home_19000 }}/bin/dbca -J-Djava.io.tmpdir={{ oracle_user_home }}/tmp -silent -createDuplicateDB -gdbName {{ dbstby }} -primaryDBConnectionString {{ server_prim }}:{{ vm_LSNRPORT }}/{{ dbprim }} -sysPassword {{ slussel_sys }} -sid {{ dbstby }} -initParams db_name={{ dbprim }} -createAsStandby -adminManaged -databaseConfigType SINGLE -dbUniqueName {{ dbstby }}"
 
 
   CONF_DG: "{{ oracle_home_19000 }}/bin/dgmgrl /  {{ conf_dg_cmd }}"
@@ -549,7 +558,6 @@
   dbca_storage_asm: ASM_STORAGE
   dbca_storage_dnfs: dNFS 
   dbca_instance_si: SINGLE
-#  dbca_redosize: 1024
   dbca_redosize: 1073741824
   dbca_total_mb: 4096
   dbca_db_purpose: GENERAL_PURPOSE

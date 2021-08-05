@@ -1,21 +1,21 @@
 [all]
-pred09
-ctlpoc60
+pred09 ansible_host=192.168.1.209 ansible_hostname=pred09 node=pred09 ansible_python_interpreter='/usr/bin/python3'
+ctlpoc60 ansible_host=192.168.1.209 ansible_hostname=pred09 node=pred09 ansible_python_interpreter='/usr/bin/python3'
 orapoc01
 orapoc02
 
 [controller]
-ctlpoc60
+ctlpoc60 ansible_host=192.168.1.209 ansible_hostname=pred09 node=pred09 ansible_python_interpreter='/usr/bin/python3'
 
 [oranodes]
 orapoc01
 orapoc02
 
 [primnodes]
-orapoc01 dbname=POC19 ansible_host=192.168.0.61 ansible_hostname=orapoc01 node=orapoc01
+orapoc01 dbname=POC19 ansible_host=192.168.0.61 ansible_hostname=orapoc01 node=orapoc01 ansible_python_interpreter='/usr/bin/python3'
 
 [stbynodes]
-orapoc02 dbname=DPOC19 ansible_host=192.168.0.64 ansible_hostname=orapoc02 node=orapoc02
+orapoc02 dbname=DPOC19 ansible_host=192.168.0.64 ansible_hostname=orapoc02 node=orapoc02 ansible_python_interpreter='/usr/bin/python3'
 
 [linuxnodes]
 pred09

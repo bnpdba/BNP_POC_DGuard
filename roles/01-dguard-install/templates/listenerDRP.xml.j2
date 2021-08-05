@@ -1,25 +1,28 @@
-SID_LIST_LISTENER=
-  (SID_LIST=
-    (SID_DESC=
-      (GLOBAL_DBNAME={{ dstosid_SID_stby }})
-      (SERVICE_NAME={{ dstosid_SID_stby }})
-      (ORACLE_HOME={{ oracle_home_19000 }})
-    )
-  )
-
-LISTENER_{{ dstosid_SID_stby }} =
+LISTENER =
    (DESCRIPTION_LIST =
       (DESCRIPTION =
+         (ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1521))
          (ADDRESS = (PROTOCOL = TCP)(HOST = {{ server_stby }})(PORT = {{ vm_LSNRPORT }}))
       )
    )
 
-SID_LIST_LISTENER=
+##static registration for Dataguard
+
+SID_LIST_LISTENER =
   (SID_LIST=
     (SID_DESC=
-      (SERVICE_NAME={{ dstosid_SID_stby }}_DGMGRL)
-      (GLOBAL_DBNAME={{ dstosid_SID_stby }})
-      (INSTANCE_NAME={{ dstosid_SID_stby }})
+      (GLOBAL_DBNAME={{ dbstby }}_DGMGRL)
       (ORACLE_HOME={{ oracle_home_19000 }})
+      (SID_NAME={{ dbstby }})
+      (ENVS = "TNS_ADMIN={{ DB_TNS_ADMIN }}")
+    )
+    (SID_DESC=
+      (GLOBAL_DBNAME={{ dbstby }})
+      (ORACLE_HOME={{ oracle_home_19000 }})
+      (SID_NAME={{ dbstby }})
+      (ENVS = "TNS_ADMIN={{ DB_TNS_ADMIN }}")
     )
   )
+
+REGISTRATION_INVITED_NODES_LISTENER=()
+VALID_NODE_CHECKING_REGISTRATION_LISTENER_IB=SUBNET

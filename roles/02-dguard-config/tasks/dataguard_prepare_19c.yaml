@@ -1,5 +1,6 @@
 ---
- - hosts: oranodes
+ - hosts: "{{ groups['primnodes'][0]|trim }}"
+# - hosts: oranodes
    name: "Configure DataGuard"
    gather_facts: True
 
@@ -22,33 +23,28 @@
 
    - name: "Include variables for RedHat and start configuring DataGuard"
      failed_when:
-       - node is not defined
        - node not in groups['oranodes']
-     when:
-       - node is defined
-       - node in groups['oranodes']
      debug:
        msg: 'Current hostname={{ node }} should be Defined and be the Primary:{{ server_prim }} OR Standby:{{ server_stby }} before startng this Prepare and Duplicate'
      tags: 01_chknode
      
-   - name: "Checking DB {{ dbstby }} existence in {{ oratab_file }}"
+   - name: "Checking DB {{ dbstby }} existence in {{ oratab_file }} and comment out when present"
      register: absence
      lineinfile:
        path: "{{ oratab_file }}"
        regexp: '^{{ dbname }}'
        state: absent
-     when:
-       - node is defined
-       - node in groups['stbynodes']
+     delegate_to: "{{groups['oranodes'][1]}}"
      failed_when: absence is changed
      ignore_errors: True
+     when:
+       - node in groups['primnodes']
      tags: 01_chkoratab
 
    - name: "Checking whether Standby DB {{ dbstby }} is already in {{ oratab_file }}"
      debug: msg="Attention ! The Standby-database {{ dbname }} to be duplicated from Primary {{ dbprim }} is already in {{ oratab_file }},comment or remove it"
      when:
-       - node is defined
-       - node in groups['stbynodes']
+       - node in groups['primnodes']
        - absence is changed
      tags: 01_chkoratab
 
@@ -67,7 +63,6 @@
          set long 5000; 
          select NAME "db_name",DB_UNIQUE_NAME "db_unique_name",DATABASE_ROLE "db_role",LOG_MODE "log_mode",FORCE_LOGGING "force_logging" from v\$database where LOG_MODE = 'ARCHIVELOG';
      when:  
-       - node is defined 
        - node in groups['primnodes'] 
      register: sqloutput
      tags: 02_veriflog
@@ -87,7 +82,6 @@
          - sql>startup
          - sql>archive log list;
      when: 
-       - node is defined 
        - node in groups['primnodes'] 
        - "'no rows selected' in sqloutput.stdout"
      failed_when: "'no rows selected' in sqloutput.stdout"
@@ -101,7 +95,6 @@
          =========
          - Switching Database:{{ dbprim }} to ARCHIVELOG !!!
      when: 
-       - node is defined 
        - node in groups['primnodes'] 
        - "'no rows selected' in sqloutput.stdout"
      tags: 02_logmode
@@ -132,7 +125,6 @@
          spool off;
          EOF
      when:
-       - node is defined
        - node in groups['primnodes']
        - "'no rows selected' in sqloutput.stdout"
      register: archive_mode
@@ -148,7 +140,6 @@
          - Switching Database:{{ dbprim }} to ARCHIVELOG !!!
          - {{ archive_mode.stdout }}
      when: 
-       - node is defined 
        - node in groups['primnodes'] 
        - "'no rows selected' in sqloutput.stdout"
      tags: 02_logswitch
@@ -173,8 +164,8 @@
        - { owner: "{{ oracle_user }}"  , dest: "{{ mnt_dgconfig }}"       }
        - { owner: "{{ oracle_user }}"  , dest: "{{ ansible_tmp_dir }}"    }
      when:
-       - node is defined
        - node in groups['primnodes']
+     delegate_to: "{{groups['oranodes'][1]}}"
      tags: 03_confdirs
 
    - name: "Configure DB parameters for DGuard on Prim DB:{{ dbprim }} and node:{{ server_prim }}"
@@ -192,18 +183,19 @@
          alter database force logging;
          alter system set log_archive_config='dg_config=({{ dbprim }},{{ dbstby }})' scope=both sid='*';
          alter system set log_archive_dest_1='location=USE_DB_RECOVERY_FILE_DEST valid_for=(all_logfiles,all_roles) db_unique_name={{ dbname }}' scope=both sid='*';
-         alter system set log_archive_dest_2='service={{ dbstby }} valid_for=(online_logfiles,primary_role) db_unique_name={{ dbname }}' scope=both sid='*';
-         alter system set log_archive_dest_state_2='defer' scope=both sid='*';
+         alter system set log_archive_dest_2='service={{ dbstby }} valid_for=(online_logfiles,primary_role) db_unique_name={{ dbstby }}' scope=both sid='*';
+         alter system set log_archive_dest_state_1='enable' scope=both sid='*';
+         alter system set log_archive_dest_state_2='enable' scope=both sid='*';
          alter system set fal_client={{ dbname }} scope=both sid='*';
          alter system set fal_server={{ dbname }} scope=both sid='*';
          alter system set standby_file_management=AUTO scope=both;
-         alter system set db_file_name_convert={{ mnt_data01 }}/{{ dbstby }},{{ mnt_data01 }}/{{ dbprim }}, 
-         db_file_name_convert='/oradata/fast_recovery_area/{{ dbstby }}','/oradata/fast_recovery_area/{{ dbprim }}' scope=spfile sid='*';
-         alter system set log_file_name_convert={{ mnt_data01 }}/{{ dbstby }},{{ mnt_data01 }}/{{ dbprim }},{{ dbstby }},{{ dbprim }} scope=spfile sid='*';
-         alter database add standby logfile thread 1 group 4 ( '{{ mnt_redo }}/{{ dbname }}/standby04.log' ) size {{ dbca_redosize }} reuse;
-         alter database add standby logfile thread 1 group 5 ( '{{ mnt_redo }}/{{ dbname }}/standby05.log' ) size {{ dbca_redosize }} reuse;
-         alter database add standby logfile thread 1 group 6 ( '{{ mnt_redo }}/{{ dbname }}/standby06.log' ) size {{ dbca_redosize }} reuse;
-         alter database add standby logfile thread 1 group 7 ( '{{ mnt_redo }}/{{ dbname }}/standby07.log' ) size {{ dbca_redosize }} reuse;
+         alter system set db_file_name_convert='{{ mnt_data01 }}/{{ dbstby }}','{{ mnt_data01 }}/{{ dbprim }}', 
+         '/oradata/fast_recovery_area/{{ dbstby }}','/oradata/fast_recovery_area/{{ dbprim }}' scope=spfile sid='*';
+         alter system set log_file_name_convert='{{ mnt_data01 }}/{{ dbstby }}','{{ mnt_data01 }}/{{ dbprim }}' scope=spfile sid='*';
+         alter database add standby logfile thread 1 group 4 ( '{{ mnt_data01 }}/{{ dbprim }}/standby04.log' ) size {{ dbca_redosize }} reuse;
+         alter database add standby logfile thread 1 group 5 ( '{{ mnt_data01 }}/{{ dbprim }}/standby05.log' ) size {{ dbca_redosize }} reuse;
+         alter database add standby logfile thread 1 group 6 ( '{{ mnt_data01 }}/{{ dbprim }}/standby06.log' ) size {{ dbca_redosize }} reuse;
+         alter database add standby logfile thread 1 group 7 ( '{{ mnt_data01 }}/{{ dbprim }}/standby07.log' ) size {{ dbca_redosize }} reuse;
          alter system set cluster_database=FALSE scope=spfile sid='*';
          alter system set log_archive_max_processes=4 scope=spfile sid='*';
          alter system set "_use_realfree_heap"=FALSE scope=spfile sid='*';
@@ -213,13 +205,14 @@
          alter system set audit_file_dest={{ mnt_adump }} scope=spfile sid='*';
          alter system set audit_sys_operations=FALSE scope=spfile sid='*';
          alter system set audit_trail=NONE scope=spfile sid='*';
-         alter system set local_listener=LISTENER_{{ dbname }} scope=both sid='*';
+         alter system set local_listener="(ADDRESS=(PROTOCOL=TCP)(HOST=server_prim)(port=1521))" scope=both sid='*';
+         alter system set dispatchers="(PROTOCOL=TCP)(SERVICE={{ dbname }}XDB)" scope=both sid='*';
+         alter system set adg_redirect_dml=FALSE scope=both sid='*';
          alter system set dg_broker_start=FALSE scope=both sid='*';
          create pfile='/tmp/init{{ dbname }}.ora' from spfile;
          spool off;
          EOF
      when:
-       - node is defined
        - node in groups['primnodes']
      tags: 03_confdb_prim
 
@@ -233,7 +226,6 @@
          exit;
          EOF
      when:
-       - node is defined
        - node in groups['primnodes']
      tags: 04_stopdb
 
@@ -249,7 +241,6 @@
          exit;
          EOF
      when:
-       - node is defined
        - node in groups['primnodes']
      tags: 04_startdb
 
@@ -263,11 +254,28 @@
      with_items:
        - { org: '{{ oracle_home_19000 }}/dbs/orapw{{ dbprim }}' , tgt: '{{ oracle_home_19000 }}/dbs/orapw{{ dbstby }}' }
      when:
-       - node is defined
        - node in groups['primnodes']
      tags: 05_pullorapw
 
-   - name: "Copy listener and tnsnames between {{ server_prim }} and {{ server_stby }} using Template Method"
+   - name: "Stop any existing Listener"
+     become_user: "{{ oracle_user }}"
+     shell: |
+       export ORACLE_HOME={{ oracle_home_19000 }}; export ORACLE_SID={{ dbstby }}; export PATH=$PATH:$ORACLE_HOME/bin
+       {{ oracle_home_19000 }}/bin/lsnrctl stop
+     delegate_to: "{{groups['oranodes'][1]}}"
+     ignore_errors: true
+     tags: 05_stoplist
+
+   - name: "Remove existing listener.ora on Standby Server under {{ DB_TNS_ADMIN }} as the duplicate-process creates new listener.ora with (netca)"
+     file:
+       path: "{{ item }}"
+       state: absent
+     with_items:
+       - "{{ LISTENER_ORA }}" 
+     delegate_to: "{{groups['oranodes'][1]}}"
+     tags: 05_dellist
+
+   - name: "Copy listener.ora and tnsnames.ora between {{ server_prim }} and {{ server_stby }} using templates, but save as different name"
      template:
        src: "{{ item.tplsrc }}"
        dest: "{{ item.dst }}"
@@ -275,68 +283,61 @@
        group: "{{ oracle_group }}"
        mode: "0664"
      when:
-       - node is defined
-       - node in groups['stbynodes']
+       - node in groups['primnodes']
      with_items:
-       - { tplsrc: "{{ LIST_DRP_TPL }}" , dst: "{{ LISTENER_ORA }}" }
-       - { tplsrc: "{{ TNS_TPL }}"      , dst: "{{ TNSNAMES_ORA }}" }
+       - { tplsrc: "{{ LIST_DRP_TPL }}" , dst: "{{ LISTENER_STBY }}" }
+       - { tplsrc: "{{ TNS_TPL }}"      , dst: "{{ TNSNAMES_STBY }}" }
+     delegate_to: "{{groups['oranodes'][1]}}"
      tags: 05_copylist
 
-   - name: "Stop Listener LISTENER_{{ dbstby }}"
-     become_user: "{{ oracle_user }}"
-     shell: |
-       export ORACLE_HOME={{ oracle_home_19000 }}; export ORACLE_SID={{ dbstby }}; export PATH=$PATH:$ORACLE_HOME/bin
-       {{ oracle_home_19000 }}/bin/lsnrctl stop
-     when:
-       - node is defined
-       - node in groups['stbynodes']
-     tags: 05_stoplist
+  #################################################################
+  # Verify existing Standby Databases and Prepare for the new one #
+  #################################################################
 
-   - name: "Start Listener LISTENER_{{ dbstby }} before start Duplicating the Database from {{ dbprim }}"
-     become_user: "{{ oracle_user }}"
-     shell: |
-       export ORACLE_HOME={{ oracle_home_19000 }}; export ORACLE_SID={{ dbstby }}; export PATH=$PATH:$ORACLE_HOME/bin
-       {{ oracle_home_19000 }}/bin/lsnrctl start
+   - name: Verify existing Databases and Prepare for the new one
+     shell: "ps -fu {{ oracle_user }} | grep -v 'grep' | grep 'ora_' | grep -v tnslsnr | grep -v LISTEN | grep {{ dbstby }} | awk '{print $2}'" 
+     delegate_to: "{{groups['oranodes'][1]}}"
      when:
-       - node is defined
-       - node in groups['stbynodes']
-     tags: 05_startlist
-
-   - name: "Status Listener LISTENER_{{ dbstby }} before creating the Database {{ dbstby }} "
-     become_user: "{{ oracle_user }}"
-     shell: |
-       export ORACLE_HOME={{ oracle_home_19000 }}; export ORACLE_SID={{ dbstby }}; export PATH=$PATH:$ORACLE_HOME/bin
-       {{ oracle_home_19000 }}/bin/lsnrctl stat
-     when:
-       - node is defined
-       - node in groups['stbynodes']
-     tags: 05_statlist
-
-   - name: "Checking whether Standby processes with same OracleSID {{ dbstby }} are already running"
-     shell: "ps -fu {{ oracle_user }} | grep -v 'grep' | grep 'ora_' | grep -v LISTEN | grep {{ dbstby }} | awk '{print $2}'"
-     when: 
-       - node is defined
-       - node in groups['stbynodes']
-     register: absence
+       - node in groups['primnodes']
+     register: oracle_processes
      tags: 06_chkstby
 
-   - fail:
+   - name: Checking for Standby DB processes with same OracleSID {{ dbstby }} already created - already running
+     delegate_to: "{{groups['oranodes'][1]}}"
+     failed_when: oracle_processes.stdout_lines|length > 0
+     debug:
        msg: |
+
          Attention
          =========
-         - Standby Database:{{ dbstby }} IS ALREADY RUNNNING
+         - Standby Database:{{ dbstby }} exists already and IS RUNNNING
 
          Solution
          ========
-         - Stop this Standby DB {{ dbstby }}
-         - Remove {{ dbstby }} from oratab 
-         - Stop and start the listener 
-         - Start this playbook again
-     when: absence is changed
+         - Drop and stop this Standby DB {{ dbstby }}
+         - You can do this with {{ oracle_home_19000 }}/bin/dbshut $ORACLE_HOME
+
+         - Stop also the listener if not already done by dbshut
+         - You can do this with {{ oracle_home_19000 }}/bin/lsnrctl stop
+         - Also remove the existing listener.ora on the Stanby Server {{ server_stby }} (as the duplicate will create a new one !!)
+         - Also remove the Broker config files under existing Stanby Server {{ server_stby }} (as the duplicate will create a new one !!)
+
+         - Than remove all its data under {{ mnt_oradata }} with the script /usr/local/bin/deldbdata {{ dbstby }}
+         - Do not forget to remove {{ dbstby }} from {{ oratab_file }} OR just put a '#' in front of it
+
+         - Restart this "dataguard_prepare_19c.yaml"
+
+         OR
+
+         - Just change the DB-name {{ dbstby }} in the hosts-inventory-file "{{ hosts_invent }}" and restart "dataguard_prepare_19c.yaml"
+
+     when: 
+       - oracle_processes.stdout_lines|length > 0 
      tags: 06_chkstby
 
    - debug:
-       msg: 'NO LEFT-RUNNING PROCESSES for this ORACLE_SID:{{ dbstby }} (which is OK)'
+       msg: 'NO LEFT-RUNNING PROCESSES for this Standby ORACLE_SID:{{ dbstby }} (which is OK)'
+     when: oracle_processes.stdout_lines|length == 0 and node in groups['primnodes']
      tags: 06_chkstby
 
    - name: "Duplicate new Standby DB {{ dbstby }} from the active Primary DB : {{ dbprim }}"
@@ -345,12 +346,94 @@
      shell: |
        {{ DUP_PRIM_2_STBY }}
      when:
-       - node is defined
-       - node in groups['stbynodes']
+       - node in groups['primnodes']
      register: crestby
+     delegate_to: "{{groups['oranodes'][1]}}"
      tags: 06_duptostby
 
-   - name: "Before (re)creating a new DG Config,remove all existing config files under {{ mnt_dgconfig }} on both members"
+   - name: "Putting the Standby database {{ dbstby }} in auto-start via {{ oratab_file }}"
+     replace:
+       path: "{{ oratab_file }}"
+       regexp: "{{ item.rexp }}"
+       replace: "{{ item.by }}"
+       backup: no
+     with_items:
+       - { rexp: '{{ dbstby }}:{{ oracle_home_19000 }}:N' , by: '{{ dbstby }}:{{ oracle_home_19000 }}:Y' }
+     when:
+       - node in groups['primnodes'] 
+     delegate_to: "{{groups['oranodes'][1]}}"
+     tags: 06_duptostby
+
+
+   - name: "Configure DB parameters for DGuard on Standby DB:{{ dbstby }} and node:{{ server_stby }}"
+     no_log: no
+     shell: |
+         export ORACLE_HOME={{ oracle_home_19000 }}; export ORACLE_SID={{ dbstby }}; export PATH=$PATH:$ORACLE_HOME/bin;
+         {{ oracle_home_19000 }}/bin/sqlplus -s {{ sys_user }}/{{ slussel_sys }}@{{ dbstby }} as sysdba <<EOF
+         set echo on;
+         set serverouput on;
+         spool /tmp/prep{{ dbstby }}.log;
+         alter system register;
+         alter system set log_archive_dest_1='location=USE_DB_RECOVERY_FILE_DEST valid_for=(all_logfiles,all_roles) db_unique_name={{ dbstby }}' scope=both;
+         alter system set log_archive_dest_2='service={{ dbprim }} ASYNC NOAFFIRM valid_for=(online_logfiles,primary_role) db_unique_name={{ dbprim }}' scope=both;
+         alter system set log_archive_dest_state_1='enable' scope=both;
+         alter system set log_archive_dest_state_2='enable' scope=both;
+         alter system set fal_client={{ dbstby }} scope=both sid='*';
+         alter system set fal_server={{ dbprim }} scope=both sid='*';
+         alter system set standby_file_management=AUTO scope=both;
+         alter database add standby logfile thread 1 group 4 ( '{{ mnt_reco }}/{{ dbstby }}/onlinelog/standby04.log' ) size {{ dbca_redosize }} reuse;
+         alter database add standby logfile thread 1 group 5 ( '{{ mnt_reco }}/{{ dbstby }}/onlinelog/standby05.log' ) size {{ dbca_redosize }} reuse;
+         alter database add standby logfile thread 1 group 6 ( '{{ mnt_reco }}/{{ dbstby }}/onlinelog/standby06.log' ) size {{ dbca_redosize }} reuse;
+         alter database add standby logfile thread 1 group 7 ( '{{ mnt_reco }}/{{ dbstby }}/onlinelog/standby07.log' ) size {{ dbca_redosize }} reuse;
+         alter system set cluster_database=FALSE scope=spfile sid='*';
+         alter system set log_archive_max_processes=4 scope=spfile sid='*';
+         alter system set "_use_realfree_heap"=FALSE scope=spfile sid='*';
+         alter system set dg_broker_config_file1='{{ mnt_dgconfig }}/dg_broker_config_{{ dbstby }}_file1.dat' scope=spfile sid='*';
+         alter system set dg_broker_config_file2='{{ mnt_dgconfig }}/dg_broker_config_{{ dbstby }}_file2.dat' scope=spfile sid='*';
+         alter system set diagnostic_dest={{ mnt_diag }} scope=spfile sid='*';
+         alter system set audit_file_dest={{ mnt_adump }} scope=spfile sid='*';
+         alter system set audit_sys_operations=FALSE scope=spfile sid='*';
+         alter system set audit_trail=NONE scope=spfile sid='*';
+         alter system set dispatchers="(PROTOCOL=TCP)(SERVICE={{ dbstby }}XDB)" scope=both sid='*';
+         alter system set local_listener="(ADDRESS=(PROTOCOL=TCP)(HOST=server_stby)(port=1521))" scope=both sid='*';
+         alter system register;
+         alter system set adg_redirect_dml=FALSE scope=both sid='*';
+         alter system set dg_broker_start=TRUE scope=both sid='*';
+         create pfile='/tmp/init{{ dbstby }}.ora' from spfile;
+         shutdown immediate;
+         connect / as sysdba;
+         startup mount;
+         spool off;
+         EOF
+     when:
+       - node in groups['primnodes']
+     delegate_to: "{{groups['oranodes'][1]}}"
+     tags: 09_confdb_stby
+
+   - name: "Before (re)creating a new DG Config,DISABLE all active DataGuard params on Standby"
+     become: true
+     become_user: "{{ oracle_user }}"
+     become_method: sudo
+     no_log: no
+     shell: |
+         export ORACLE_HOME={{ oracle_home_19000 }}; export ORACLE_SID={{ dbstby }}; export PATH=$PATH:$ORACLE_HOME/bin;
+         {{ oracle_home_19000 }}/bin/sqlplus -s {{ sys_user }}/{{ slussel_sys }}@{{ dbstby }} as sysdba <<EOF
+         set echo on;
+         set serverouput on;
+         spool /tmp/disable{{ dbstby }}.log;
+         alter system set dg_broker_start=FALSE scope=both sid='*';
+         alter system set adg_redirect_dml=FALSE scope=both sid='*';
+         alter system set inmemory_adg_enabled=FALSE scope=spfile sid='*';
+         alter system set log_archive_dest_2='' scope=both;
+         alter system set adg_redirect_dml=FALSE scope=both sid='*';
+         spool off;
+         EOF
+     when:
+       - node in groups['primnodes'] 
+     delegate_to: "{{groups['oranodes'][1]}}"
+     tags: 10_credg
+
+   - name: "Remove all existing config files under {{ mnt_dgconfig }}"
      become: true
      become_user: "{{ root_user }}"
      become_method: sudo 
@@ -360,36 +443,32 @@
        - { tgt: '{{ mnt_dgconfig }}/dg_broker_config_{{ dbname }}_file1.dat' }
        - { tgt: '{{ mnt_dgconfig }}/dg_broker_config_{{ dbname }}_file2.dat' }
      when:
-       - node is defined
-       - node in groups['oranodes']
-     tags: 07_del_dgdat
+       - node in groups['primnodes'] 
+     delegate_to: "{{groups['oranodes'][1]}}"
+     tags: 10_credg
 
-   - name: "Before (re)creating a new DG Config,reset all DB DataGuard params"
+   - name: "Re-ENABLE all DataGuard params again"
      become: true
      become_user: "{{ oracle_user }}"
      become_method: sudo
      no_log: no
      shell: |
-         export ORACLE_HOME={{ oracle_home_19000 }}; export ORACLE_SID={{ dbname }}; export PATH=$PATH:$ORACLE_HOME/bin;
-         {{ oracle_home_19000 }}/bin/sqlplus -s {{ sys_user }}/{{ slussel_sys }}@{{ dbname }} as sysdba <<EOF
+         export ORACLE_HOME={{ oracle_home_19000 }}; export ORACLE_SID={{ dbstby }}; export PATH=$PATH:$ORACLE_HOME/bin;
+         {{ oracle_home_19000 }}/bin/sqlplus -s {{ sys_user }}/{{ slussel_sys }}@{{ dbstby }} as sysdba <<EOF
          set echo on;
          set serverouput on;
-         spool /tmp/resetparm.log;
-         alter system set dg_broker_start=FALSE scope=both sid='*';
+         spool /tmp/enableparm.log;
+         alter system set dg_broker_config_file1='{{ mnt_dgconfig }}/dg_broker_config_{{ dbstby }}_file1.dat' scope=both sid='*';
+         alter system set dg_broker_config_file2='{{ mnt_dgconfig }}/dg_broker_config_{{ dbstby }}_file2.dat' scope=both sid='*';
+         alter system set log_archive_dest_2='service={{ dbprim }} valid_for=(online_logfiles,primary_role) db_unique_name={{ dbprim }}' scope=both;
          alter system set adg_redirect_dml=FALSE scope=both sid='*';
-         alter system set inmemory_adg_enabled=FALSE scope=spfile sid='*';
-         alter system reset dg_broker_config_file1 scope=both sid='*';
-         alter system reset dg_broker_config_file2 scope=both sid='*';
-         alter system set dg_broker_config_file1='{{ mnt_dgconfig }}/dg_broker_config_{{ dbname }}_file1.dat' scope=both sid='*';
-         alter system set dg_broker_config_file2='{{ mnt_dgconfig }}/dg_broker_config_{{ dbname }}_file2.dat' scope=both sid='*';
-         alter system set inmemory_adg_enabled=TRUE scope=spfile sid='*';
          alter system set dg_broker_start=TRUE scope=both sid='*';
          spool off;
          EOF
      when:
-       - node is defined
-       - node in groups['oranodes']
-     tags: 08_dgreset
+       - node in groups['primnodes'] 
+     delegate_to: "{{groups['oranodes'][1]}}"
+     tags: 10_credg
 
    - name: "Put correct protections on Standby DG config files under {{ mnt_dgconfig }}"
      file:
@@ -399,54 +478,12 @@
        state: file
        mode: 0660
      with_items:
-       - { owner: "{{ oracle_user }}"  , dest: '{{ mnt_dgconfig }}/dg_broker_config_{{ dbname }}_file1.dat' }
-       - { owner: "{{ oracle_user }}"  , dest: '{{ mnt_dgconfig }}/dg_broker_config_{{ dbname }}_file2.dat' }
+       - { owner: "{{ oracle_user }}"  , dest: '{{ mnt_dgconfig }}/dg_broker_config_{{ dbstby }}_file1.dat' }
+       - { owner: "{{ oracle_user }}"  , dest: '{{ mnt_dgconfig }}/dg_broker_config_{{ dbstby }}_file2.dat' }
      when:
-       - node is defined
-       - node in groups['oranodes']
-     tags: 08_chown_dgdat
-
-   - name: "Configure DB parameters for DGuard on Standby DB:{{ dbstby }} and node:{{ server_stby }}"
-     no_log: no
-     shell: |
-         export ORACLE_HOME={{ oracle_home_19000 }}; export ORACLE_SID={{ dbname }}; export PATH=$PATH:$ORACLE_HOME/bin;
-         {{ oracle_home_19000 }}/bin/sqlplus -s {{ sys_user }}/{{ slussel_sys }}@{{ dbname }} as sysdba <<EOF
-         set echo on;
-         set serverouput on;
-         spool /tmp/prep{{ dbname }}.log;
-         alter system register;
-         alter system set log_archive_dest_1='location=USE_DB_RECOVERY_FILE_DEST valid_for=(all_logfiles,all_roles) db_unique_name={{ dbname }}' scope=both;
-         alter system set log_archive_dest_2='service={{ dbprim }} valid_for=(online_logfiles,primary_role) db_unique_name={{ dbname }}' scope=both;
-         alter system set log_archive_dest_state_2='defer' scope=both;
-         alter system set fal_client={{ dbname }} scope=both sid='*';
-         alter system set fal_server={{ dbname }} scope=both sid='*';
-         alter system set standby_file_management=AUTO scope=both;
-         alter database add standby logfile thread 1 group 4 ( '{{ mnt_redo }}/{{ dbname }}/standby04.log' ) size {{ dbca_redosize }} reuse;
-         alter database add standby logfile thread 1 group 5 ( '{{ mnt_redo }}/{{ dbname }}/standby05.log' ) size {{ dbca_redosize }} reuse;
-         alter database add standby logfile thread 1 group 6 ( '{{ mnt_redo }}/{{ dbname }}/standby06.log' ) size {{ dbca_redosize }} reuse;
-         alter database add standby logfile thread 1 group 7 ( '{{ mnt_redo }}/{{ dbname }}/standby07.log' ) size {{ dbca_redosize }} reuse;
-         alter system set cluster_database=FALSE scope=spfile sid='*';
-         alter system set log_archive_max_processes=4 scope=spfile sid='*';
-         alter system set "_use_realfree_heap"=FALSE scope=spfile sid='*';
-         alter system set dg_broker_config_file1='{{ mnt_dgconfig }}/dg_broker_config_{{ dbname }}_file1.dat' scope=spfile sid='{{ dbname }}';
-         alter system set dg_broker_config_file2='{{ mnt_dgconfig }}/dg_broker_config_{{ dbname }}_file2.dat' scope=spfile sid='{{ dbname }}';
-         alter system set diagnostic_dest={{ mnt_diag }} scope=spfile sid='*';
-         alter system set audit_file_dest={{ mnt_adump }} scope=spfile sid='*';
-         alter system set audit_sys_operations=FALSE scope=spfile sid='*';
-         alter system set audit_trail=NONE scope=spfile sid='*';
-         alter system set local_listener=NONE scope=spfile sid='*';
-         alter system set local_listener=LISTENER_{{ dbname }} scope=both sid='*';
-         alter system set dg_broker_start=FALSE scope=both sid='*';
-         create pfile='/tmp/init{{ dbname }}.ora' from spfile;
-         shutdown immediate;
-         connect / as sysdba;
-         startup mount;
-         spool off;
-         EOF
-     when:
-       - node is defined
-       - node in groups['stbynodes']
-     tags: 09_confdb_stby
+       - node in groups['primnodes'] 
+     delegate_to: "{{groups['oranodes'][1]}}"
+     tags: 10_credg
 
    - name: "(Re-)Configure DG Broker on the Primary Server"
      become: true
@@ -462,6 +499,5 @@
          exit;
          EOF
      when:
-       - node is defined
        - node in groups['primnodes']
      tags: 10_credg
