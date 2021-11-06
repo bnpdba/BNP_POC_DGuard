@@ -1,4 +1,4 @@
-# Added on 05/08/2021 on the github-server (bnpdba) : DataGuard with Oracle 19.12/Redhat 7.9 (BNP Fortis)
+# Added on 05/11/2021 : DataGuard with Oracle 19.12/Redhat 7.9
 
 Repo-link : https://github.com/oralinuxdba/DGuard19c 
 #
